@@ -1,0 +1,2736 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>爪Pro · Paw Pro</title>
+<style>
+  :root{
+      /* ---- 底色层（带紫味的近黑，不用纯 #000）---- */
+      --bg-void:#06030D;
+      --bg-abyss:#0C0618;
+      --panel:#120A24;
+      --panel-inset:#180E30;
+      /* ---- 强调色（紫霓虹：与图标渐变 #DEB0FF→#7A24D2 同源）---- */
+      --accent:#8B5CF6;
+      --accent-deep:#5B1E9E;
+      --accent-mint:#3EF0C4;
+      --accent-blue:#A78BFA;
+      --accent-ultra:#3B1478;
+      --alert:#FF2D4B;
+      --spark:#FF9A3C;
+      /* ---- 文字 ---- */
+      --tx-hi:#F0E8FF;
+      --tx-mid:#9C8CC4;
+      --tx-dim:#5F4E85;
+      /* ---- 线 / 网格 / 辉光 ---- */
+      --line:rgba(139,92,246,.22);
+      --line-soft:rgba(139,92,246,.10);
+      --grid:rgba(139,92,246,.055);
+      --glow:rgba(139,92,246,.55);
+      --glow-soft:rgba(139,92,246,.18);
+      /* ---- 形状：科技风靠切角而不是圆角 ---- */
+      --chamfer:12px;
+      --t-fast:.18s;
+      --ease:cubic-bezier(.4,0,.2,1);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      background:var(--bg-void);
+      color:var(--tx-hi);
+      font-family:"Inter","HarmonyOS Sans SC","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+      font-size:13px;
+      min-height:100vh;
+      /* 顶部留出标题栏的高度，否则内容会被压在标题栏下面 */
+      padding:52px 24px 28px;
+      overflow-x:hidden;
+    }
+
+    /* ---------- 滚动条：跟全息风统一 ----------
+       【原来为什么显眼】完全没有 ::-webkit-scrollbar 样式，
+       WebView2 会用默认的亮灰色Win10 滚动条压在深色内容上，
+       是整个界面里唯一的亮色元素，一眼就出戏。
+       现在做成细窄的青色发光条，滑块和轨道都走切角风格。 */
+    /* 【v31 为什么把滚动条隐藏了】
+       滚动条占的是**视口最右侧 11px**，而 position:fixed 的包含块
+       不含滚动条 —— 也就是说右边那条缩放热区被滚动条盖住，
+       鼠标移到最右边缘是滚动条（箭头），拖不动。
+       实测过：左/上/下三个方向光标正常，右/右下死掉，就是这个原因。
+       现在把滚动条宽度设 0：滚轮照样能滚，右边 8px 让给缩放热区。 */
+    ::-webkit-scrollbar{width:0;height:0}
+    ::-webkit-scrollbar-track{
+      background:rgba(12,6,24,.9);
+      /* 左侧一条细网格线，和 body 的背景网格对齐 */
+      border-left:1px solid var(--line-soft);
+    }
+    ::-webkit-scrollbar-thumb{
+      background:linear-gradient(180deg,var(--accent-deep),#2E0F5E);
+      border:1px solid rgba(139,92,246,.35);
+      /* 切角而不是圆角，和面板保持同一套形状语言 */
+      clip-path:polygon(0 0,100% 0,100% calc(100% - 4px),
+                        calc(100% - 4px) 100%,0 100%);
+      min-height:38px;
+    }
+    ::-webkit-scrollbar-thumb:hover{
+      background:linear-gradient(180deg,var(--accent),var(--accent-deep));
+      box-shadow:0 0 10px var(--glow);
+    }
+    /* 两条轨道交汇的方块，默认是亮灰色，必须盖掉 */
+    ::-webkit-scrollbar-corner{background:rgba(12,6,24,.9)}
+    ::-webkit-scrollbar-button{display:none}
+
+    /* ---------- 边框缩放热区 ----------
+       frameless 窗口的边缘没有系统边框，用户不知道能拖。
+       在四周埋 8 条热区，鼠标移上去变对应方向的光标。
+       【v31】8px（原来 5px 太细，抓不住）；按下后由前端抓指针、
+       后端 SetWindowPos，不再交给系统的模态缩放循环（见 win_resize_begin）。
+       z-index 必须高于 titlebar，否则标题栏右侧几像素会抢走鼠标。 */
+    .rz{position:fixed;z-index:40}
+    .rz-t{top:0;left:10px;right:10px;height:8px;cursor:n-resize}
+    .rz-b{bottom:0;left:10px;right:10px;height:8px;cursor:s-resize}
+    .rz-l{left:0;top:10px;bottom:10px;width:8px;cursor:w-resize}
+    .rz-r{right:0;top:10px;bottom:10px;width:8px;cursor:e-resize}
+    .rz-tl{top:0;left:0;width:14px;height:14px;cursor:nwse-resize}
+    .rz-tr{top:0;right:0;width:14px;height:14px;cursor:nesw-resize}
+    .rz-bl{bottom:0;left:0;width:14px;height:14px;cursor:nesw-resize}
+    .rz-br{bottom:0;right:0;width:14px;height:14px;cursor:nwse-resize;
+           background:linear-gradient(135deg,transparent 45%,
+                      rgba(139,92,246,.5) 45%,rgba(139,92,246,.5) 55%,
+                      transparent 55%,transparent 62%,
+                      rgba(139,92,246,.3) 62%,rgba(139,92,246,.3) 70%,
+                      transparent 70%)}
+    /* 最大化后不能拖边框（Windows 也是这个行为） */
+    body.maxed .rz{display:none}
+
+    /* ---------- 自绘标题栏 ----------
+       无边框窗口（frameless=True）没有系统标题栏，
+       自己画一条才能和整体的全息深色统一。
+       系统那条是亮色 Win10 风格，深色内容配亮色标题条很割裂。 */
+    .titlebar{
+      position:fixed;top:0;left:0;right:0;height:34px;z-index:30;
+      display:flex;align-items:center;
+      background:linear-gradient(180deg,#150C28 0%,#0E0718 100%);
+      border-bottom:1px solid var(--line);
+      /* 上边一条高光线，是全息面板的标志性细节 */
+      box-shadow:0 1px 0 rgba(139,92,246,.14), 0 4px 14px rgba(0,0,0,.5);
+      user-select:none;-webkit-user-select:none;
+    }
+    .titlebar .tb-left{display:flex;align-items:center;gap:9px;padding-left:14px;min-width:0}
+    /* 标题栏不能选中文本，否则拖动会选中一片 */
+    /* 【v34 复核修复】左上角 logo 原来是 CSS 画的紫色切角**方块**，
+       和程序图标（三根紫尖爪）完全对不上——主人指出的「不一致」就是它。
+       现在换成与 assets/PawPro-violet.ico 同款的爪形内联 SVG：
+       渐变 #DEB0FF→#7A24D2 直接取自图标本体，缩放不糊、不依赖外部文件
+       （HTML 会被 dashboard.py 整体内嵌进 exe，必须自包含）。 */
+    .titlebar .tb-logo{
+      width:14px;height:14px;flex:none;display:block;
+      filter:drop-shadow(0 0 5px var(--glow));
+    }
+    .titlebar .tb-logo svg{width:100%;height:100%;display:block}
+    .titlebar .tb-title{
+      font-size:11.5px;font-weight:600;letter-spacing:.13em;
+      color:var(--tx-hi);white-space:nowrap;
+    }
+    .titlebar .tb-ver{
+      font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+      color:var(--tx-dim);white-space:nowrap;
+      padding-left:10px;border-left:1px solid var(--line-soft);
+    }
+    .titlebar .tb-right{margin-left:auto;display:flex;height:100%}
+    .titlebar .tb-btn{
+      width:44px;height:100%;border:0;background:transparent;
+      color:var(--tx-mid);cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease);
+    }
+    .titlebar .tb-btn:hover{background:rgba(139,92,246,.13);color:var(--tx-hi)}
+    .titlebar .tb-btn:active{background:rgba(139,92,246,.22)}
+    /* 关闭按钮 hover 变红——这是用户肌肉记忆，不能改 */
+    .titlebar .tb-close:hover{background:#C42B1C;color:#fff}
+
+    /* ---------- 触发方式区 ---------- */
+    .sublabel{
+      margin:14px 0 8px;font-size:10px;letter-spacing:.2em;
+      text-transform:uppercase;color:var(--tx-dim);
+      padding-top:12px;border-top:1px dashed var(--line-soft);
+    }
+    .trig{margin-top:var(--s5,20px)}
+    .trig .keycap.mint{
+      color:var(--accent-mint);border-color:rgba(62,240,196,.4);
+      background:rgba(62,240,196,.08);
+    }
+    .trig-grid{
+      display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3,12px);
+      margin:14px 0 4px;
+    }
+    .trig-cell{
+      border:1px solid var(--line-soft);
+      border-left:2px solid var(--accent);
+      background:linear-gradient(180deg,rgba(139,92,246,.06),rgba(18,10,36,.4));
+      padding:11px 14px;
+      clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),
+                        calc(100% - 7px) 100%,0 100%);
+    }
+    .trig-cell .tc-title{
+      font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+      color:var(--tx-dim);margin-bottom:7px;
+    }
+    .trig-cell .tc-body{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+    .trig-cell .tc-kbd{
+      font-family:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
+      font-size:17px;font-weight:700;color:var(--accent);
+      text-shadow:0 0 12px var(--glow);
+    }
+    .trig-cell .tc-kbd.amber{color:var(--spark);text-shadow:0 0 12px rgba(255,154,60,.5)}
+    .trig-cell .tc-hint{font-size:11px;color:var(--tx-dim)}
+
+    .trig-bind{
+      display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+      margin-top:12px;padding-top:12px;border-top:1px dashed var(--line-soft);
+    }
+    .trig-bind .tb-label{font-size:12px;color:var(--tx-mid);flex:0 0 auto}
+    .trig-bind .tb-arrow{color:var(--tx-dim);font-size:13px;flex:0 0 auto}
+    /* 注意：不能写 min-width:180px 之外再让 select 自适应，
+       flex 项的 flex-basis 默认是 auto，内容短的会被拉伸/撑开。
+       固定 basis +允许收缩，两个下拉才并排一行。 */
+    .trig-bind select{flex:0 1 220px;width:220px;min-width:0}
+    .trig-bind button{flex:0 0 auto}
+
+    /* ---------- 宏录制区（v27 / S2） ----------
+       独立整宽分区，不塞进上面的三栏：宏是「录一次、以后反复放」的
+       另一套工作流，和连点/锁定的实时控制不同类；而且宽屏下三栏
+       已经有鼠标/键盘/触发三张卡，硬塞第四张会把 1440 的三栏等高
+       布局挤成 3+1（规则 43 的验收就是量这个）。
+       四格复用 .trig-cell 的同一套皮，视觉跟着触发方式区走。 */
+    .macro{margin-top:var(--s5,20px)}
+    .macro .macro-grid{
+      display:grid;gap:12px;margin-top:12px;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+    }
+    /* 四格在 1240 的窄屏会挤成每个 280px，文字全折行 —— 降两列 */
+    @media (max-width:1320px){
+      .macro .macro-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media (max-width:760px){
+      .macro .macro-grid{grid-template-columns:1fr}
+    }
+    .macro .mc-inline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .macro .mc-inline + .mc-inline{margin-top:8px}
+    .macro .mc-inline label{font-size:11px;color:var(--tx-dim);flex:0 0 auto}
+    .macro .mc-inline input[type=text],
+    .macro .mc-inline input[type=number]{flex:1 1 90px;min-width:0;width:auto}
+    .macro .mc-inline select{flex:1 1 90px;min-width:0;width:auto}
+    .macro .mc-inline button{flex:0 0 auto;width:auto;min-width:0;padding:8px 12px}
+    .macro .mc-check{
+      display:flex;align-items:center;gap:6px;margin-top:8px;
+      font-size:11px;color:var(--tx-mid);cursor:pointer;
+    }
+    .macro .mc-check input{width:auto;flex:0 0 auto}
+    .macro .mc-stat{
+      font-size:11.5px;color:var(--tx-mid);
+      font-family:"JetBrains Mono",Consolas,monospace;
+    }
+    .macro .mc-stat b{color:var(--accent);font-size:14px}
+    .macro .mc-preview{
+      margin-top:7px;font-size:11px;color:var(--tx-dim);line-height:1.5;
+      min-height:32px;word-break:break-all;
+    }
+
+    /* ---------- 步骤列表（v30）----------
+       照成熟宏编辑器的形态：一行一个节点，点一行打开设置弹窗。
+       不再让用户面对几百条原始事件。 */
+    .macro .mc-steps{
+      margin-top:8px;max-height:190px;overflow:auto;
+      border:1px solid var(--line);background:rgba(255,255,255,.02);
+      font-family:"JetBrains Mono",Consolas,monospace;font-size:11.5px;
+    }
+    .macro .mc-steps::-webkit-scrollbar{width:8px}
+    .macro .mc-steps::-webkit-scrollbar-thumb{background:rgba(139,92,246,.35)}
+    .macro .mc-step{
+      display:grid;grid-template-columns:34px minmax(0,1fr) auto;
+      gap:8px;align-items:center;padding:6px 9px;cursor:pointer;
+      border-bottom:1px solid rgba(255,255,255,.05);
+    }
+    .macro .mc-step:hover{background:rgba(139,92,246,.10)}
+    .macro .mc-step.sel{background:rgba(139,92,246,.16);
+      box-shadow:inset 2px 0 0 var(--accent)}
+    .macro .mc-step .ms-i{color:var(--tx-dim);font-size:10.5px;text-align:right}
+    .macro .mc-step .ms-l{color:var(--tx-hi);overflow:hidden;
+      text-overflow:ellipsis;white-space:nowrap}
+    .macro .mc-step .ms-d{color:var(--accent-mint);font-size:10.5px;
+      white-space:nowrap}
+    .macro .mc-empty{padding:14px 10px;color:var(--tx-dim);
+      font-size:11px;text-align:center}
+    .macro .mc-steps-more{font-size:10.5px;color:var(--tx-dim);margin-top:4px}
+
+    /* ---------- 节点设置弹窗 ---------- */
+    .mc-modal{position:fixed;inset:0;z-index:200;display:none;
+      background:rgba(4,9,20,.68);backdrop-filter:blur(3px);
+      align-items:center;justify-content:center;padding:24px}
+    .mc-modal.show{display:flex}
+    .mc-dialog{width:min(520px,100%);max-height:88vh;overflow:auto;
+      background:linear-gradient(160deg,rgba(18,32,58,.98),rgba(9,16,32,.98));
+      border:1px solid rgba(139,92,246,.35);padding:18px 22px 20px;
+      box-shadow:0 24px 60px rgba(0,0,0,.6)}
+    .mc-dh{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+    .mc-dh b{font-size:15px;color:var(--tx-hi)}
+    .mc-dh span{font-size:11px;color:var(--tx-dim)}
+    .mc-x{margin-left:auto;width:auto;padding:2px 8px;background:transparent;
+      border:1px solid var(--line);color:var(--tx-dim);cursor:pointer}
+    .mc-field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+    .mc-field label{font-size:11px;color:var(--tx-dim)}
+    .mc-field input,.mc-field select{width:100%}
+    .mc-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .mc-tip{font-size:10.5px;color:var(--tx-dim);line-height:1.6;
+      margin:-2px 0 12px}
+    .mc-dfoot{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .mc-dfoot button{flex:0 0 auto;width:auto}
+    .mc-dfoot .primary{margin-left:auto}
+    .mc-danger{color:var(--alert)!important;
+      border-color:rgba(255,90,90,.45)!important}
+
+    /* ---------- 按键捕获组件 ----------
+       替代「104 个键位的下拉」：点一下按钮进入捕获，
+       然后按什么键就录什么。组合键会显示成Ctrl + W。
+       下拉只留给真正需要枚举的项（如「点击 / 长按」）。 */
+    .capwrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%}
+    /* 已录下的键：筹码（chip）形式，点 × 单独删一个 */
+    .capchip{
+      display:inline-flex;align-items:center;gap:6px;
+      font-family:"JetBrains Mono",Consolas,monospace;
+      font-size:11.5px;font-weight:700;color:var(--accent);
+      background:rgba(139,92,246,.12);
+      border:1px solid rgba(139,92,246,.45);
+      padding:4px 8px 4px 10px;
+      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
+                        calc(100% - 5px) 100%,0 100%,0 5px);
+    }
+    .capchip .x{
+      cursor:pointer;color:var(--tx-dim);font-weight:400;
+      font-size:13px;line-height:1;padding:0 1px;
+    }
+    .capchip .x:hover{color:var(--alert)}
+    /* 正在等待按键时的占位提示 */
+    .capwait{
+      font-size:11.5px;color:var(--accent-mint);
+      border:1px dashed rgba(62,240,196,.5);
+      padding:4px 11px;
+      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
+                        calc(100% - 5px) 100%,0 100%,0 5px);
+      animation:pulse 1.1s var(--ease) infinite;
+    }
+
+    /* 原始输入自检条：绑键没反应时，一眼看出是"没收到消息"还是"绑不上去" */
+    .rawdiag{
+      display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;
+      margin-top:9px;padding:6px 10px;
+      font-size:11px;letter-spacing:.02em;
+      color:var(--text-dim);
+      background:rgba(255,255,255,.025);
+      border-left:2px solid rgba(62,240,196,.4);
+    }
+    .rawdiag .rd-item b{font-weight:600;color:var(--text);
+      font-variant-numeric:tabular-nums}
+    .rawdiag .rd-item b.ok{color:var(--accent-mint)}
+    .rawdiag .rd-item b.bad{color:var(--spark)}
+    .rawdiag .rd-item b.rd-hot{color:var(--accent-mint)}
+    .rawdiag .rd-hint{flex:1 1 100%;color:var(--text-dim);opacity:.82;
+      line-height:1.5}
+
+    /* 「开始识别」后按钮呼吸，提示用户现在该按侧键了 */
+    button.pulse{animation:breathe 1.4s var(--ease) infinite;
+      border-color:var(--accent-mint)!important;color:var(--accent-mint)!important}
+    button:disabled{opacity:.42;cursor:not-allowed}
+    /* 底层：径向渐层 + 网格平铺。
+       性能注意：网格必须用 background-size 平铺，不要堆重复 DOM。 */
+    body::before{
+      content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+      background:
+        radial-gradient(120% 90% at 50% 0%, var(--bg-abyss) 0%, var(--bg-void) 70%),
+        linear-gradient(var(--grid) 1px,transparent 1px),
+        linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+      background-size:100% 100%,32px 32px,32px 32px;
+    }
+/* 扫描线纹理 */
+  body::after{
+    content:"";position:fixed;inset:0;pointer-events:none;z-index:1;
+    background:repeating-linear-gradient(0deg,
+      rgba(255,255,255,.022) 0 1px, transparent 1px 3px);
+  }
+  /* 全局扫描光束：只给1 个元素跑动画，别整屏加。
+     刻意压得很淡（.22 -> .12）：这道光束会从 KPI 数字上扫过去，
+     太亮会把文字盖住，看起来像「文字变白了/配色错了」。 */
+  .scanbeam{
+    position:fixed;left:0;right:0;height:2px;pointer-events:none;z-index:5;
+    background:linear-gradient(90deg,transparent,rgba(139,92,246,.12),transparent);
+    animation:scanline 11s linear infinite;
+  }
+    @keyframes scanline{ 0%{top:-4%} 100%{top:104%} }
+    @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.35} }
+    @keyframes breathe{
+      0%,100%{box-shadow:0 0 18px var(--glow-soft)}
+      50%{box-shadow:0 0 34px rgba(139,92,246,.42)}
+    }
+    /* 【2026-10-16 主人两条反馈定下的宽屏方案】
+       ① 「最大化后两边全黑区域很违和」→ 横向空间必须用起来
+       ② 「单纯拉伸太蠢，功能区、按钮都被拉长很难看」→ 不许拉宽面板
+       调研结论（Tailwind / 大屏设计惯例 / Grid 自动布局）：
+       宽屏靠**加列**吃掉多余宽度，容器封顶；面板保持自己的舒适宽度。
+       所以窄窗口完全不变（仍是单列竖排），只有拉宽到 1440px 以上才切换：
+       （阈值取 1440 而不是 1500：窗口宽度 ≠ 视口宽度，页面内容会出
+        纵向滚动条，视口比窗口窄约 17~24px。设 1500 的话，用户把窗口
+        拖到 1500 反而进不了三栏 —— 反直觉。）
+         row1  [ 头部 ]
+         row2  [ 鼠标区 ][ 键盘区 ][ 触发方式 ]
+         row3  [ 功能说明 · 文字分两栏 ]
+       .grid 用 display:contents 退化成「透明壳」：它自己不生成盒子，
+       里面的两张卡片直接进外层网格，才能和触发方式排成同一行。 */
+    .wrap{max-width:1240px;margin:0 auto;position:relative;z-index:2}
+    @media (min-width:1440px){
+      /* 【2026-10-16 第二轮反馈：三栏要「齐」，光排开不够】
+         第一版只做到「加列」，但三张卡各自按内容高度自然撑开，
+         底部参差；三段的说明文字长短不一，又把下面的第一行控件
+         顶到不同高度 —— 观感就是「杂乱无章」。补两件事：
+           ① align-items 用默认的 stretch：三栏**等高**、底部边框齐平
+              （原来写 align-items:start，三栏各高各的）；
+           ② 三张卡的说明段给统一 min-height：下面的第一行控件
+              （鼠标按键 / 生效按键 / 三个触发格）才会落在同一水平线上。
+         ⚠ 不要为了「尾部沉底」给卡片加 display:flex：卡片内是 block 流，
+         .row(margin-bottom) 与 .btnrow(margin-top)、.sublabel(margin-top)
+         靠**相邻边距折叠**维持在 11~16px；一旦变 flex，折叠失效，
+         间距会变成 11+16=27px 这类叠加值，而且三栏元素组合不同、
+         各自膨胀量还不一样 —— 越改越乱。等高就够整齐了。 */
+      .wrap{max-width:1840px;display:grid;gap:14px;
+            grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.08fr)}
+      .wrap>.hero{grid-column:1/-1;grid-row:1}
+      /* 【v31 新元素必须显式排位】流程条是 .wrap 的直接子元素，若不给
+         grid-row，它会被自动放置到「第一个空格子」——实测在 2560 下
+         掉到卡片下方（第 3 行第 1 列），顶部反而空着。 */
+      .wrap>.flow{grid-column:1/-1;grid-row:2;margin-top:0}
+      .wrap>.grid{display:contents}
+      .wrap>.grid>#cardMouse{grid-column:1;grid-row:3}
+      .wrap>.grid>#cardKey{grid-column:2;grid-row:3}
+      /* ⚠ .trig 在窄屏有 margin-top:20px（和上方卡片的间距）。
+         三栏并排后它还留着，会把触发方式卡**整体压低 20px**，
+         顶部对不齐 —— 这才是「三个区杂乱无章」的主因之一，实测过。 */
+      .wrap>.trig{grid-column:3;grid-row:3;margin-top:0}
+      /* 宏录制区（v27）整行铺在第 4 排，不让它挤进三栏：宏是另一套工作流，
+         且三栏等高（规则 43）量的就是鼠标/键盘/触发这三张卡。 */
+      .wrap>.macro{grid-column:1/-1;grid-row:4;margin-top:0}
+      /* 说明段等高：下面第一行控件的起始线才会对齐。
+         取「能容三行」的高度（实测最长的那段是 3 行），
+         短的那两栏留一点白，换三栏严格齐平 —— 对齐优先。 */
+      .wrap>.grid>#cardMouse>.hint,
+      .wrap>.grid>#cardKey>.hint,
+      .wrap>.trig>.hint{min-height:58px;margin-bottom:14px}
+      /* v31：整块「功能说明」已删，原来的 .desc 两栏规则一并去掉（死规则）。 */
+      /* 触发方式挤进 1/3 宽（~620px）后，三格并排每格只剩 190px；
+         固定两列，别让 auto-fit 在临界宽度上抖成 3 列 */
+      .wrap>.trig .trig-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      /* 【v30 主人反馈：最大化后键盘区、触发方式区底部一大片空白】
+         三栏等高（stretch）本身是对的，问题在内容短的两栏底部空着。
+         参考仪表盘的通行做法：把「页脚」钉在卡片底部 —— 卡片改纵向
+         flex，状态行 / 自检条用 margin-top:auto 吃掉剩余空间。
+         视觉上从「卡片下方一块死白」变成「内容与页脚之间的呼吸间距」，
+         鼠标区内容最多、位置基本不变，三栏底边仍然齐平。
+         ⚠ flex 下相邻 margin 不再折叠（.row 的 mb 11 + .btnrow 的 mt 16
+         会叠成 27），所以把这种情况的间隔抵回 16 —— 不然三栏里
+         有 .row 的那两张会整体被推低 11px，顶部就又不齐了。 */
+      .wrap>.grid>#cardMouse,
+      .wrap>.grid>#cardKey,
+      .wrap>.trig{display:flex;flex-direction:column}
+      .wrap>.grid>#cardMouse>.status,
+      .wrap>.grid>#cardKey>.status,
+      .wrap>.trig>.rawdiag{margin-top:auto}
+      .wrap .card>.row+.btnrow{margin-top:5px}
+    }
+    /* 再宽（21:9 / 32:9 带鱼屏）就上第 4 栏，别让 1840 的上限把两边留空。
+       【v31 修正】v18 那会儿第 4 栏放的是「功能说明」段，v31 把整块说明删了，
+       第 4 栏就成了空黑框（实测 2560 截图右半边全空）。改成把宏录制区搬进
+       第 4 栏、纵向跨第 2~3 行：宽度用满、三张主卡仍是 1/4 宽不被拉长，
+       宏区内部四格在窄栏里改单列竖排（否则每格只剩 140px，字全折行）。 */
+    @media (min-width:2200px){
+      .wrap{max-width:none;grid-template-columns:repeat(4,minmax(0,1fr))}
+      .wrap>.trig{grid-column:3;grid-row:3}
+      .wrap>.macro{grid-column:4;grid-row:3/5;margin-top:0}
+      .wrap>.macro .macro-grid{grid-template-columns:1fr}
+    }
+
+    /* ---------- 面板通用（切角 + 发光描边） ---------- */
+    .panel{
+      position:relative;
+      background:linear-gradient(160deg, rgba(139,92,246,.10) 0%,
+                 rgba(18,10,36,.72) 42%, rgba(24,14,48,.55) 100%);
+      border:1px solid var(--line);
+      clip-path:polygon(var(--chamfer) 0,100% 0,
+                        100% calc(100% - var(--chamfer)),
+                        calc(100% - var(--chamfer)) 100%,0 100%,0 var(--chamfer));
+      box-shadow:0 0 24px var(--glow-soft), inset 0 0 32px rgba(139,92,246,.06);
+      padding:16px 24px;
+    }
+    /* 顶部全息高光描边 */
+    .panel::before{
+      content:"";position:absolute;left:var(--chamfer);right:0;top:0;height:1px;
+      background:linear-gradient(90deg,transparent,var(--glow) 30%,var(--glow) 70%,transparent);
+    }
+    /* ---------- 四角 HUD 角标 ---------- */
+    .hud{position:relative}
+    .hud i{position:absolute;width:14px;height:14px;
+           border:1px solid var(--accent);opacity:.9;pointer-events:none}
+    .hud i:nth-child(1){left:-1px;top:-1px;border-right:0;border-bottom:0}
+    .hud i:nth-child(2){right:-1px;top:-1px;border-left:0;border-bottom:0}
+    .hud i:nth-child(3){left:-1px;bottom:-1px;border-right:0;border-top:0}
+    .hud i:nth-child(4){right:-1px;bottom:-1px;border-left:0;border-top:0}
+
+/* ---------- Hero ---------- */
+  .hero{padding:18px 26px 16px}
+  .topbar{
+    display:flex;align-items:center;gap:14px;
+    padding-bottom:12px;border-bottom:1px solid var(--line-soft);
+  }
+  .hero h1{
+    font-size:24px;letter-spacing:.14em;font-weight:700;line-height:1.1;
+    color:var(--tx-hi);
+    text-shadow:0 0 10px var(--glow),0 0 28px rgba(139,92,246,.25);
+  }
+  .hero h1 .thin{color:var(--accent);font-weight:400}
+  .topbar .sub{
+    font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--tx-dim);margin-top:4px;
+  }
+  .topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+  /* 状态标签：圆点 + 全大写 */
+  .tag{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:4px 11px;font-size:10px;font-weight:600;
+    letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent-mint);
+    border:1px solid rgba(62,240,196,.38);
+    background:rgba(62,240,196,.08);
+    clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),
+                      calc(100% - 4px) 100%,0 100%,0 4px);
+  }
+  .tag::before{
+    content:"";width:5px;height:5px;border-radius:50%;
+    background:var(--accent-mint);box-shadow:0 0 8px var(--accent-mint);
+    animation:pulse 1.8s var(--ease) infinite;
+  }
+  .tag.run{color:var(--accent);border-color:rgba(139,92,246,.45);background:rgba(139,92,246,.10)}
+  .tag.run::before{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  /* 暂停态：琥珀色，和「运行中」的青色明确区分 */
+  .tag.pause{color:#FFB347;border-color:rgba(255,179,71,.45);background:rgba(255,179,71,.10)}
+  .tag.pause::before{background:#FFB347;box-shadow:0 0 8px #FFB347}
+
+  /* 右上角暂停按钮：幽灵样式，不抢主按钮的视觉重心 */
+  .ghostbtn{
+    flex:0 0 auto;min-width:0;
+    height:34px;padding:0 15px;
+    display:inline-flex;align-items:center;justify-content:center;
+    font:600 11px/1 "Inter","Microsoft YaHei",inherit;letter-spacing:.12em;
+    color:var(--tx-mid);background:rgba(255,255,255,.04);
+    border:1px solid var(--line-soft);
+    clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
+                      calc(100% - 8px) 100%,0 100%,0 8px);
+    cursor:pointer;transition:color .15s var(--ease),border-color .15s var(--ease);
+  }
+  .ghostbtn:hover{color:var(--accent);border-color:rgba(139,92,246,.45)}
+  .ghostbtn.paused{color:#FFB347;border-color:rgba(255,179,71,.5);
+                   background:rgba(255,179,71,.08)}
+
+  /* 全局消息行：单独一行，和各区分区状态分开 */
+  .gmsg{
+    margin-top:10px;padding:7px 12px;font-size:12px;color:var(--tx-mid);
+    background:rgba(18,10,36,.5);border-left:2px solid var(--accent-deep);
+  }
+
+  .hero .tagline{margin-top:11px;color:var(--tx-mid);font-size:12.5px;line-height:1.7}
+  /* KPI 行：等宽大数字 + 标签 + 迷你条 */
+  .hero-grid{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    gap:12px;margin-top:13px;
+  }
+  .kpi{
+    position:relative;
+    background:linear-gradient(180deg,rgba(139,92,246,.06),rgba(18,10,36,.55));
+    border:1px solid var(--line-soft);
+    border-left:2px solid var(--accent-deep);
+    padding:10px 13px;
+    clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),
+                      calc(100% - 8px) 100%,0 100%);
+  }
+  /* 辉光用 ::after 画在文字下层，而不是给文字加 text-shadow。
+     【踩过的坑】text-shadow + overflow:hidden + text-overflow:ellipsis
+     三个一起用，Chromium(WebView2) 会把阴影渲成一大块纯色盖住文字，
+     表现为「KPI 变成蓝底白块，字看不清」。
+     用独立伪元素做辉光就没有这个冲突。 */
+  .kpi .n{
+    position:relative;
+    font-family:"JetBrains Mono","Cascadia Mono",Consolas,monospace;
+    font-size:20px;font-weight:700;line-height:1.15;color:var(--accent);
+    /* 必须加：数字每秒刷新时不左右抖动 */
+    font-variant-numeric:tabular-nums;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  /* 【踩过的坑，别再加回来】KPI 文字的辉光试过两种写法，两种都炸：
+     1) text-shadow + overflow:hidden + text-overflow:ellipsis
+        -> Chromium(WebView2) 把阴影渲成一大块纯色，直接盖住文字；
+     2) 用 .n::after + filter:blur() 画在下层当辉光
+        -> 在 clip-path 的父容器里 blur 会溢出成蓝块。
+     所以这里就**不加任何文字辉光**，靠颜色和字重区分层次。
+     面板标题的 text-shadow 没有 overflow/ellipsis，是安全的，可以留。 */
+  /* 「就绪」这类非运行态用弱化色 + 小一号字，不要抢主数据的视觉权重 */
+  .kpi .n.idle{color:var(--tx-mid);font-size:16px;padding-top:3px}
+  .kpi .n.on{color:var(--accent-mint)}
+  .kpi .t{
+    font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--tx-dim);margin-top:3px;
+  }
+  /* 迷你进度条。
+     【踩过的大坑】原本这里写的是
+        background:linear-gradient(90deg,#5B1E9E,#8B5CF6); box-shadow:0 0 8px;
+     在 2px 高 + overflow:hidden 的容器里，Chromium(WebView2) 会把
+     box-shadow 辉光渲染成**一整块亮蓝色矩形**盖住 KPI 文字，
+     表现为「就绪 / 0 / 0s 全变成蓝底白块，完全看不清」。
+     定位过程见交付说明：单独去掉 box-shadow 或单独去掉渐变都无效，
+     必须整条 bar 一起去掉才归零 —— 是两者叠加触发的合成异常。
+     现在改成：渐变只画在 2px 的<i> 上，辉光靠 ::after 的低透明度色，
+     且不给它box-shadow。 */
+  .kpi .bar{height:2px;background:var(--line-soft);margin-top:7px;overflow:hidden}
+  .kpi .bar>i{
+    position:relative;display:block;height:100%;width:40%;
+    background:linear-gradient(90deg,var(--accent-blue),var(--accent));
+  }
+  .kpi .bar>i::after{
+    content:"";position:absolute;inset:0;
+    background:var(--accent);opacity:.35;filter:blur(2px);
+    pointer-events:none;
+  }
+
+/* ---------- 一句话流程条 ----------
+     原来是整块「功能说明 / FUNCTION」两大段（占一屏），v31 删掉，
+     只留这条三步流程 + 一句注意。要查细节看使用说明.md。 */
+  .flow{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    margin-top:14px;padding:9px 16px;
+    border:1px solid var(--line-soft);
+    border-left:2px solid var(--accent-deep);
+    background:linear-gradient(90deg,rgba(139,92,246,.07),rgba(18,10,36,.45));
+    font-size:12px;color:var(--tx-mid);
+  }
+  .flow .fs b{color:var(--accent);margin-right:5px;font-weight:700}
+  .flow .fa{color:var(--accent-deep)}
+  .flow .fnote{margin-left:auto;color:var(--tx-dim);font-size:11px}
+
+    /* ---------- HUD 分割线 ---------- */
+    .divider{position:relative;height:1px;background:var(--line-soft);margin:16px 0}
+    .divider::before{
+      content:"";position:absolute;left:0;top:0;width:56px;height:1px;
+      background:var(--accent);box-shadow:0 0 8px var(--glow);
+    }
+    .divider::after{
+      content:"";position:absolute;right:0;top:-3px;width:96px;height:7px;
+      background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 8px);
+    }
+
+    /* ---------- 卡片网格：左鼠标 / 右键盘 ---------- */
+    .grid{margin-top:16px;display:grid;gap:16px;
+          grid-template-columns:repeat(2,minmax(0,1fr))}
+    @media (max-width:880px){
+      .grid{grid-template-columns:1fr}
+      .hero-grid{grid-template-columns:repeat(2,1fr)}
+    }
+    .card{padding:18px 24px 20px}
+    /* 运行时激活态：主色描边 + 呼吸辉光 */
+    .card.on{
+      border-color:rgba(139,92,246,.55);
+      animation:breathe 3.2s var(--ease) infinite;
+    }
+    .card.k.on{border-color:rgba(255,154,60,.55)}
+    .card h2{
+      font-size:15px;letter-spacing:.16em;text-transform:uppercase;
+      display:flex;align-items:center;gap:9px;color:var(--tx-hi);
+      text-shadow:0 0 10px var(--glow);
+    }
+    .card.k h2{color:var(--tx-hi)}
+    .card.k h2 .dot{background:var(--spark);box-shadow:0 0 10px var(--spark)}
+    .card h2 .dot{
+      width:6px;height:6px;border-radius:50%;
+      background:var(--accent);box-shadow:0 0 10px var(--accent);
+      flex:none;
+    }
+    .card .hint{font-size:11.5px;color:var(--tx-dim);margin:7px 0 15px;line-height:1.7}
+    .hint.tiny{font-size:11px;line-height:1.65;margin:2px 0 14px}
+    /* 降级提示：只改颜色不加框——它是 hkNote 位置的内联提示，
+       套 .warn 的大框会把触发方式区撑变形 */
+    .hint.tiny.warn{color:var(--spark)}
+
+    /* 热键按键帽 */
+    .keycap{
+      margin-left:auto;font-family:"Cascadia Mono",Consolas,monospace;
+      font-size:11px;font-weight:700;letter-spacing:.1em;
+      padding:3px 10px;color:var(--accent);
+      border:1px solid rgba(139,92,246,.5);background:rgba(139,92,246,.10);
+      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
+                        calc(100% - 5px) 100%,0 100%,0 5px);
+      box-shadow:0 0 14px rgba(139,92,246,.28);
+    }
+    .keycap.amber{
+      color:var(--spark);border-color:rgba(255,154,60,.5);
+      background:rgba(255,154,60,.10);box-shadow:0 0 14px rgba(255,154,60,.25);
+    }
+
+    /* ---------- 表单 ---------- */
+    .row{
+      display:grid;grid-template-columns:126px 1fr;
+      gap:12px;align-items:center;margin-bottom:11px;
+    }
+    .row>label{
+      font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+      color:var(--tx-dim);text-align:right;
+    }
+    input,select{
+      background:rgba(24,14,48,.75);border:1px solid var(--line-soft);
+      color:var(--tx-hi);padding:8px 11px;font-size:13px;outline:none;width:100%;
+      font-family:inherit;
+      clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),
+                        calc(100% - 6px) 100%,0 100%,0 6px);
+      transition:all var(--t-fast) var(--ease);
+    }
+    input:focus,select:focus{
+      border-color:var(--accent);background:rgba(139,92,246,.08);
+      box-shadow:0 0 0 1px rgba(139,92,246,.3),0 0 16px rgba(139,92,246,.18);
+    }
+    select option{background:#120A24;color:var(--tx-hi)}
+    /* 复选框行：整行可点，不能继承右对齐的小字标签样式 */
+    .row label.chk{
+      display:flex;align-items:center;gap:8px;text-align:left;
+      color:var(--tx-mid);font-size:12px;letter-spacing:0;
+      text-transform:none;cursor:pointer;line-height:1.5;
+    }
+    .row label.chk input{
+      width:auto;flex:none;margin:0;cursor:pointer;accent-color:#8B5CF6;
+      padding:0;
+    }
+    /* 固定坐标行：输入框和「取当前」按钮并排（.row 是两列 grid，
+       按钮必须包一层，直接当第三个子元素会撑出第三列） */
+    .poswrap{display:flex;gap:8px;align-items:center;min-width:0}
+    .poswrap input{flex:1;min-width:0}
+    .poswrap button{flex:none;min-width:0;width:auto;padding:8px 12px;
+      letter-spacing:.08em}
+    /* v26 多点坐标：文本框在上、按钮在下（竖排），否则 3 行文本挤成一团 */
+    .poswrap.col{flex-direction:column;align-items:stretch}
+    .poswrap textarea{
+      width:100%;resize:vertical;min-height:64px;
+      font:12px/1.5 "Consolas","Microsoft YaHei",monospace;
+      letter-spacing:.04em
+    }
+    .btnrow.tight{margin-top:6px;gap:6px}
+
+    /* ---------- 按钮 ---------- */
+    .btnrow{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+    /* 【v31 按钮统一】以前同一个界面里三种尺寸（大主按钮 / 小幽灵按钮 /
+       标题栏图标按钮），行高、切角、字距各写一套，看着散。
+       现在统一成一套：高 34px、切角 8px、11px/600、字距 .14em，
+       宽度仍然 flex:1 均分（同一行按钮等宽）。 */
+    button{
+      flex:1;min-width:112px;height:34px;padding:0 16px;cursor:pointer;
+      display:inline-flex;align-items:center;justify-content:center;gap:7px;
+      font:600 11px/1 "Inter","Microsoft YaHei",inherit;
+      letter-spacing:.14em;text-transform:uppercase;
+      color:var(--tx-hi);
+      background:linear-gradient(180deg,rgba(139,92,246,.16),rgba(139,92,246,.04));
+      border:1px solid rgba(139,92,246,.42);
+      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
+                        calc(100% - 8px) 100%,0 100%,0 8px);
+      transition:all var(--t-fast) var(--ease);
+    }
+    button:hover{background:rgba(139,92,246,.28);box-shadow:0 0 18px rgba(139,92,246,.45)}
+    button:active{transform:translateY(1px)}
+    button.primary{
+      background:linear-gradient(180deg,var(--accent-blue),var(--accent-ultra));
+      border-color:rgba(139,92,246,.8);
+      box-shadow:0 0 20px rgba(42,108,255,.45);
+    }
+    button.primary:hover{box-shadow:0 0 26px rgba(42,108,255,.7)}
+    button.stop{
+      background:linear-gradient(180deg,rgba(255,45,75,.22),rgba(255,45,75,.05));
+      border-color:rgba(255,45,75,.48);color:#FFD2DA;
+    }
+    button.stop:hover{background:rgba(255,45,75,.32);box-shadow:0 0 18px rgba(255,45,75,.35)}
+
+    /* ---------- 状态条 ---------- */
+    .status{
+      margin-top:15px;padding-top:12px;
+      border-top:1px solid var(--line-soft);
+      font-size:12px;color:var(--tx-dim);min-height:32px;line-height:1.6;
+    }
+    .status.live{color:var(--accent-mint)}
+    /* 分区状态的「已暂停」：琥珀色斜体，一眼看出是暂停不是停止 */
+    .status.live.paused{color:#FFB347;font-style:italic}
+    /* 就绪态（两段式流程的「参数已装填，等触发键」）：青色。
+       和运行中的薄荷绿、暂停的琥珀色三者必须能一眼区分——
+       主人 2026-10-15 的 bug 就是「就绪」和「已启动」看起来没区别。 */
+    .status.armed{color:var(--accent)}
+    .kpi .n.armed{color:var(--accent);font-size:16px;padding-top:3px}
+    /* 【分区暂停·2026-10-16】触发键切的是暂停，KPI 第三个态：
+       运行=薄荷绿、就绪=青、暂停=琥珀。以前只有两个态，
+       「暂停中」显示成和「运行中」一样的绿色，看不出停了。 */
+    .kpi .n.pause{color:#ffa73a;font-size:16px;padding-top:3px}
+    .card.armed{border-color:rgba(139,92,246,.45)}
+    .card.k.armed{border-color:rgba(255,154,60,.45)}
+    /* 提权警告横幅：目标窗口权限更高、注入被 UIPI 拦截时显示，
+       带「以管理员身份重启」按钮（调 relaunch_as_admin） */
+    .elevban{
+      display:none;margin-top:12px;
+      border:1px solid rgba(255,154,60,.5);background:rgba(255,154,60,.10);
+      color:var(--spark);padding:10px 14px;font-size:12px;line-height:1.7;
+      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
+                        calc(100% - 8px) 100%,0 100%,0 8px);
+    }
+    .elevban.show{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+    .elevban .eb-txt{flex:1 1 260px}
+    .elevban button{
+      flex:0 0 auto;cursor:pointer;font-size:12px;padding:6px 14px;
+      background:rgba(255,154,60,.18);border:1px solid rgba(255,154,60,.55);
+      color:var(--spark);border-radius:2px;
+    }
+    .elevban button:hover{background:rgba(255,154,60,.30)}
+    .warn{
+      margin-top:14px;border:1px solid rgba(255,154,60,.38);
+      background:rgba(255,154,60,.08);color:var(--spark);
+      padding:10px 13px;font-size:12px;
+      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
+                        calc(100% - 8px) 100%,0 100%,0 8px);
+    }
+    @media (prefers-reduced-motion:reduce){ *{animation:none!important} }
+  /* ---------- 配置面板（导入/导出/方案） ---------- */
+  /* 【默认必须隐藏】这个面板只在点齿轮按钮时出现。之前漏写 display:none，
+     div 按默认 block 渲染 → 程序一启动就挂在右上角；而 toggleCfg() 读的是
+     **内联** style.display（初始是空串，不是 "block"）→ 第一次点算出
+     「当前没开」→ 又设成 block（毫无变化）→ 第二次点才真隐藏。
+     现在默认隐藏 + 用 class 切换，两种错都不会再犯。 */
+  .cfg-panel{ position:fixed; top:34px; right:10px; z-index:50; width:300px;
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--chamfer); padding:12px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5); display:none; }
+  .cfg-panel.open{ display:block; }
+  .cfg-sec{ margin-bottom:12px; }
+  .cfg-sec:last-of-type{ margin-bottom:0; }
+  .cfg-sec-t{ font-size:11px; letter-spacing:1px; color:var(--accent-mint);
+    text-transform:uppercase; margin-bottom:7px; }
+  .cfg-row{ display:flex; gap:6px; flex-wrap:wrap; }
+  .cfg-btn{ flex:1; min-width:0; padding:7px 8px; font-size:12px; cursor:pointer;
+    color:var(--tx-hi); background:rgba(139,92,246,.10);
+    border:1px solid var(--line); border-radius:7px; }
+  .cfg-btn:hover{ background:rgba(139,92,246,.20); }
+  .cfg-btn.danger{ color:#ff9a9a; border-color:rgba(255,120,120,.35);
+    background:rgba(255,120,120,.10); }
+  .cfg-sel{ width:100%; margin-bottom:7px; padding:6px; font-size:12px;
+    color:var(--tx-hi); background:var(--bg-abyss);
+    border:1px solid var(--line); border-radius:7px; box-sizing:border-box; }
+  .cfg-hint{ font-size:10.5px; line-height:1.5; color:var(--tx-dim); margin-top:6px; }
+  .cfg-msg{ font-size:11px; margin-top:4px; min-height:14px; color:var(--accent-mint); }
+  .cfg-msg.err{ color:#ff9a9a; }
+</style>
+</head>
+<body>
+<div class="scanbeam"></div>
+
+<!-- 边框缩放热区：无边框窗口没有系统边框，边缘几像素拖不动。
+     每条热区mousedown 时把缩放循环交还 Windows（见 title_resize），
+     这也是唯一能保住「拖到屏幕边缘弹出分屏」的做法。 -->
+<div class="rz rz-t"  data-edge="t"  onpointerdown="rzDown(event,'t')"></div>
+<div class="rz rz-b"  data-edge="b"  onpointerdown="rzDown(event,'b')"></div>
+<div class="rz rz-l"  data-edge="l"  onpointerdown="rzDown(event,'l')"></div>
+<div class="rz rz-r"  data-edge="r"  onpointerdown="rzDown(event,'r')"></div>
+<div class="rz rz-tl" data-edge="tl" onpointerdown="rzDown(event,'tl')"></div>
+<div class="rz rz-tr" data-edge="tr" onpointerdown="rzDown(event,'tr')"></div>
+<div class="rz rz-bl" data-edge="bl" onpointerdown="rzDown(event,'bl')"></div>
+<div class="rz rz-br" data-edge="br" onpointerdown="rzDown(event,'br')"></div>
+
+<!-- 自绘标题栏：无边框窗口没有系统标题栏，
+     拖动/最小化/最大化/关闭都在这里做。
+     id="titlebar" 的 mousedown/move/up 交给 winDrag* 系列，
+     实际拖动走 Win32 的 WM_NCLBUTTONDOWN（见 win_drag_move），
+     这样贴边分屏、拖出屏幕这些系统行为才能正常工作。 -->
+<div class="titlebar" id="titlebar">
+  <div class="tb-left">
+    <span class="tb-logo"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><defs><linearGradient id="pawG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DEB0FF"/><stop offset="1" stop-color="#7A24D2"/></linearGradient></defs><path d="M11.2 1 L13.8 9.6 L11.9 23 L9.5 8.8 Z" fill="url(#pawG)"/><path d="M9.9 7.6 L2.9 16.6 L9.1 12.1 Z" fill="url(#pawG)" opacity=".92"/><path d="M14 7.1 L21 15.6 L14.7 11.1 Z" fill="url(#pawG)" opacity=".92"/></svg></span>
+    <span class="tb-title">爪Pro</span>
+    <span class="tb-ver">PAW PRO · 键鼠自动化</span>
+  </div>
+  <div class="tb-right">
+    <button class="tb-btn" id="cfgBtn" title="配置导入 / 导出 / 方案" onclick="toggleCfg()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+    <button class="tb-btn" id="btnMin"  title="最小化" onclick="winMin()">
+      <svg width="11" height="11" viewBox="0 0 11 11"><rect x="0" y="5" width="11" height="1.2" fill="currentColor"/></svg>
+    </button>
+    <button class="tb-btn" id="btnMax"  title="最大化 / 还原" onclick="winMax()">
+      <svg width="11" height="11" viewBox="0 0 11 11">
+        <rect x="0.5" y="0.5" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      </svg>
+    </button>
+    <button class="tb-btn tb-close" title="关闭" onclick="winClose()">
+      <svg width="11" height="11" viewBox="0 0 11 11">
+        <path d="M0 0 L11 11 M11 0 L0 11" stroke="currentColor" stroke-width="1.2" fill="none"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<div class="cfg-panel" id="cfgPanel">
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">导出 / 分享</div>
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="exportFile()">导出到文件</button>
+      <button class="cfg-btn" onclick="copyClip()">复制到剪贴板</button>
+    </div>
+    <div class="cfg-hint">导出到程序所在目录（文件名带时间戳）；或复制文本直接发给别人。</div>
+  </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">导入</div>
+    <input type="file" id="cfgFile" accept=".json,application/json" style="display:none" onchange="importFile(this)">
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="document.getElementById('cfgFile').click()">从文件导入</button>
+      <button class="cfg-btn" onclick="pasteClip()">从剪贴板粘贴</button>
+    </div>
+    <div class="cfg-hint">导入前自动备份当前配置；触发键绑定需在本地重设（设备相关）。</div>
+  </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">配置方案</div>
+    <input type="text" id="cfgProfileName" class="cfg-sel" placeholder="方案名">
+    <select id="cfgProfileSel" class="cfg-sel"><option value="">— 选择方案 —</option></select>
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="saveProfile()">存为方案</button>
+      <button class="cfg-btn" onclick="loadProfile()">加载</button>
+      <button class="cfg-btn danger" onclick="delProfile()">删除</button>
+    </div>
+    <div class="cfg-hint">方案保存在程序目录的 profiles/ 文件夹，可跨机器拷贝分享。</div>
+  </div>
+  <div class="cfg-msg" id="cfgMsg"></div>
+</div>
+
+<div class="wrap">
+
+  <!-- Hero：名称展示区 -->
+  <div class="panel hero hud">
+    <i></i><i></i><i></i><i></i>
+    <div class="topbar">
+      <div>
+        <h1>爪<span class="thin"> Pro</span></h1>
+        <div class="sub">Paw Pro · 键鼠自动化</div>
+      </div>
+      <div class="right">
+        <span class="tag" id="badge">SYS READY</span>
+        <button class="ghostbtn" id="pauseBtn" onclick="togglePause()"
+                title="全局暂停：定住所有注入动作，参数保留，再按一次恢复">暂停</button>
+      </div>
+    </div>
+    <div class="gmsg" id="gMsg">就绪</div>
+    <!-- 提权警告横幅：默认隐藏。poll 发现后端 elev_warn=True 时显示
+         （前台是提权窗口——如管理员身份运行的游戏——而本进程是普通权限，
+         注入被 UIPI 静默拦截：界面显示"已启动"，目标程序却收不到）。
+         附「以管理员身份重启」一键入口，见 relaunchAdmin()。 -->
+    <div class="elevban" id="elevBan">
+      <span class="eb-txt">⚠ 检测到前台窗口权限更高（例如以管理员身份运行的游戏），
+        本工具是普通权限——<b>点击和按键会被系统静默拦截</b>：
+        界面显示“已启动”，目标程序里却没有任何反应。
+        请以管理员身份运行本工具（点右侧按钮，弹一次 UAC 即可）。</span>
+      <button id="elevBtn" onclick="relaunchAdmin()">以管理员身份重启</button>
+    </div>
+    <div class="hero-grid">
+      <div class="kpi">
+        <div class="n" id="kMouse">就绪</div>
+        <div class="t">鼠标</div>
+      </div>
+      <div class="kpi">
+        <div class="n" id="kKey">就绪</div>
+        <div class="t">键盘</div>
+      </div>
+      <div class="kpi">
+        <div class="n" id="kClick">0</div>
+        <div class="t">点击</div>
+      </div>
+      <div class="kpi">
+        <div class="n" id="kTime">0.0s</div>
+        <div class="t">时长</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 一句话流程（v31：替掉原来的整块「功能说明」） -->
+  <div class="flow hud">
+    <span class="fs"><b>①</b> 装好参数</span>
+    <span class="fa">→</span>
+    <span class="fs"><b>②</b> 按触发键开始 / 暂停</span>
+    <span class="fa">→</span>
+    <span class="fs"><b>③</b> 回来看「停止」</span>
+    <span class="fnote">参数只在点「就绪」时装填；注入只发给当前前台窗口，所以要点完再切到目标程序。</span>
+  </div>
+
+  <!-- 卡片网格：左鼠标 / 右键盘 -->
+  <div class="grid">
+
+    <!-- 鼠标区 -->
+    <div class="panel card hud" id="cardMouse">
+      <i></i><i></i><i></i><i></i>
+      <h2><span class="dot"></span>鼠标区</h2>
+      <div class="hint">点「就绪」只装参不会启动；按 <b id="hintMouseKey">中键</b> 才开始 / 暂停，「停止鼠标」才结束。</div>
+
+      <div class="row">
+        <label>鼠标按键</label>
+        <select id="mBtn"></select>
+      </div>
+      <div class="row">
+        <label>动作</label>
+        <select id="mAct">
+          <option value="click">点击（连点）</option>
+          <option value="double">双击（每轮点两下）</option>
+          <option value="triple">三击（每轮点三下）</option>
+          <option value="hold">长按（按住不放）</option>
+          <option value="jiggle">抖器（只挪不点，防息屏）</option>
+        </select>
+      </div>
+      <div class="row" id="mJigRow" style="display:none">
+        <label>挪动间隔(秒)</label>
+        <input id="mJig" type="number" min="1" max="3600" step="1" value="30" placeholder="每隔几秒挪 1 像素">
+      </div>
+      <div class="row">
+        <label>点击次数</label>
+        <input id="mCount" type="number" min="0" value="0" placeholder="0=无限">
+      </div>
+      <div class="row">
+        <label>持续时间(秒)</label>
+        <input id="mDur" type="number" min="0" step="0.5" value="0" placeholder="0=无限">
+      </div>
+      <div class="row">
+        <label>CPS</label>
+        <input id="mCps" type="number" min="0.5" step="0.5" value="10">
+      </div>
+      <div class="row">
+        <label>间隔浮动(±ms)</label>
+        <input id="mJitter" type="number" min="0" step="1" value="0" placeholder="0=节奏恒定">
+      </div>
+      <div class="row">
+        <label>点击位置</label>
+        <select id="mMode" onchange="syncMouseRows()">
+          <option value="cursor">跟随光标</option>
+          <option value="fixed">固定坐标</option>
+          <option value="multi">多点轮询（依次点）</option>
+          <option value="box">框内随机</option>
+        </select>
+      </div>
+      <div class="row" id="mPosRow" style="display:none">
+        <label>坐标 X,Y</label>
+        <div class="poswrap">
+          <input id="mPos" placeholder="如 960,540">
+          <button type="button" onclick="recordPos()">取当前</button>
+        </div>
+      </div>
+      <div class="row" id="mPointsRow" style="display:none">
+        <label>坐标列表</label>
+        <div class="poswrap col">
+          <textarea id="mPoints" rows="3" spellcheck="false"
+                    placeholder="每行一个 x,y&#10;多点轮询：2 个以上依次点&#10;框内随机：正好 2 个（左上、右下）"></textarea>
+          <div class="btnrow tight">
+            <button type="button" onclick="recordPos()">追加当前坐标</button>
+            <button type="button" onclick="clearPoints()">清空</button>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <label>启动倒计时(秒)</label>
+        <input id="mCd" type="number" min="0" max="600" step="1" value="0" placeholder="0=立即开始">
+      </div>
+      <div class="row">
+        <label>完成后动作</label>
+        <select id="mDone">
+          <option value="none">不动作</option>
+          <option value="sound">提示音</option>
+          <option value="lock">锁屏</option>
+          <option value="shutdown">关机（30 秒倒计时可取消）</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>启动后最小化</label>
+        <label class="chk"><input type="checkbox" id="mHide" checked> 启动后自动隐藏仪表盘，把前台让给目标程序</label>
+      </div>
+      <div class="row">
+        <label>关闭到托盘</label>
+        <label class="chk"><input type="checkbox" id="mTray"> 点右上角 X 时缩到托盘继续跑（不勾=直接退出）</label>
+      </div>
+
+      <div class="btnrow">
+        <button class="primary" onclick="startMouse()">① 就绪</button>
+        <button class="stop" onclick="stopMouse()">停止鼠标</button>
+      </div>
+      <div class="row" id="doneCancelRow" style="display:none">
+        <label>收尾动作</label>
+        <button type="button" onclick="cancelDone()">取消待执行动作</button>
+      </div>
+      <div class="hint tiny">就绪＝只装参不启动；触发键开始 / 暂停；<b>「停止鼠标」才结束</b>。</div>
+      <div class="hint tiny">双击/三击按<b>轮次</b>算；浮动＝±随机；完成后动作只在<b>自然用完</b>时触发。</div>
+
+      <div class="sublabel">自定义鼠标键（游戏鼠标的额外按键）</div>
+      <div class="btnrow">
+        <button id="armBtn" onclick="armMouse()">① 开始识别</button>
+        <button id="addBtn" onclick="addMouse()">② 完成添加</button>
+      </div>
+      <div class="hint tiny">点「开始识别」后 8 秒内按一下侧键，再点「完成添加」。</div>
+
+      <div class="status" id="mStatus">鼠标区未启动。</div>
+    </div>
+
+    <!-- 键盘区 -->
+    <div class="panel card k hud" id="cardKey">
+      <i></i><i></i><i></i><i></i>
+      <h2><span class="dot"></span>键盘区</h2>
+      <div class="hint">长按目标键到阈值即锁定；触发键 <b id="hintKeyKey">F6</b> 是暂停，会同时松手。</div>
+
+      <div class="row">
+        <label>生效按键</label>
+        <div class="capwrap" id="keyCapWrap">
+          <input id="kKeys" type="text" value="w" placeholder="点右侧按钮直接按键">
+          <button class="capbtn" id="capKeysBtn" onclick="armKeyCapture()"
+                  style="flex:0 0 auto;min-width:104px">按一下录入</button>
+          <button class="capbtn" onclick="delKeyChip()"
+                  style="flex:0 0 auto;min-width:88px">删除末键</button>
+        </div>
+      </div>
+      <div class="hint tiny" id="keyCapHint">
+        点「按一下录入」再按目标键，可加 Ctrl/Alt/Shift；筹码点 × 单独删。
+      </div>
+      <div class="row">
+        <label>长按多少秒锁定</label>
+        <input id="kThr" type="number" min="0.1" step="0.1" value="2">
+      </div>
+      <div class="row">
+        <label>重复频率(次/秒)</label>
+        <input id="kHz" type="number" min="1" value="30">
+      </div>
+      <div class="row">
+        <label>锁定行为</label>
+        <select id="kMode">
+          <option value="true">一直按着</option>
+          <option value="false">反复点击</option>
+        </select>
+      </div>
+      <div class="row" id="gapRow" style="display:none">
+        <label>按下时长(毫秒)</label>
+        <input id="kGap" type="number" min="0" step="1" value="20">
+      </div>
+      <div class="hint tiny" id="gapHint">
+        「一直按着」只注入按下、不注入抬起，重复频率即按住状态的刷新频率。
+      </div>
+
+      <div class="btnrow">
+        <button class="primary" onclick="startKey()">① 就绪</button>
+        <button class="stop" onclick="stopKey()">停止</button>
+      </div>
+      <div class="hint tiny">触发键启动 / <b>暂停（会松手）</b>；「停止」才结束。</div>
+      <div class="status" id="kStatus">键盘区未启动。</div>
+      <div id="warnBox"></div>
+    </div>
+
+  </div>
+
+  <!-- 触发方式区：解决 F5 被游戏/远程控制软件占用的问题 -->
+  <div class="panel hud trig" id="cardTrig">
+    <i></i><i></i><i></i><i></i>
+    <h2><span class="dot"></span>触发方式<span class="keycap mint" id="hkNoteKey">推荐</span></h2>
+    <div class="hint">
+      系统热键容易被游戏抢，鼠标键几乎不冲突；<b>两种可同时绑，按哪个都行</b>。
+    </div>
+
+    <div class="trig-grid">
+      <div class="trig-cell">
+        <div class="tc-title">鼠标连点启停</div>
+        <div class="tc-body">
+          <span class="tc-kbd" id="hkMouse">未绑定</span>
+          <span class="tc-hint">当前生效的触发键</span>
+        </div>
+      </div>
+      <div class="trig-cell">
+        <div class="tc-title">键盘锁定启停</div>
+        <div class="tc-body">
+          <span class="tc-kbd amber" id="hkKey2">未绑定</span>
+          <span class="tc-hint">当前生效的触发键</span>
+        </div>
+      </div>
+      <div class="trig-cell">
+        <div class="tc-title">全局暂停 / 恢复</div>
+        <div class="tc-body">
+          <span class="tc-kbd" id="hkPause">Pause</span>
+          <span class="tc-hint">游戏中定住所有动作，再按恢复</span>
+        </div>
+      </div>
+      <!-- v34：宏自己的启停键。回放一启动窗口就最小化了，
+           没有系统级热键就没法中途暂停 —— 和连点/键盘锁定同构。 -->
+      <div class="trig-cell">
+        <div class="tc-title">宏录制 / 回放启停</div>
+        <div class="tc-body">
+          <span class="tc-kbd" id="hkMacro">未绑定</span>
+          <span class="tc-hint">录制中收尾 · 回放中暂停 / 继续</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="trig-bind">
+      <div class="tb-label">绑鼠标键（按一下就绑）：</div>
+      <select id="hotKeyAct">
+        <option value="mouse">→启停鼠标连点</option>
+        <option value="key">→ 启停键盘锁定</option>
+        <option value="macro">→ 启停宏回放</option>
+      </select>
+      <button class="primary" id="capTrigBtn" onclick="armTriggerCapture()">
+        按下要绑的键
+      </button>
+      <button onclick="clearTrigKey()">清除</button>
+    </div>
+    <div class="trig-bind">
+      <div class="tb-label">或改系统热键：</div>
+      <select id="hotKeySysAct">
+        <option value="mouse">→ 鼠标连点热键</option>
+        <option value="key">→ 键盘锁定热键</option>
+        <option value="macro">→ 宏启停热键</option>
+      </select>
+      <button class="capbtn" id="capSysBtn" onclick="armSysCapture()"
+              style="flex:0 0 auto;min-width:104px">按一下录入</button>
+      <button onclick="clearSysHotkey()">恢复默认</button>
+    </div>
+    <div class="hint tiny" id="hkNote"></div>
+    <div class="rawdiag" id="rawDiag" title="原始输入链路自检。按一下鼠标键，消息数应当增加。">
+      <span class="rd-item">监听：<b id="rdMode">检测中…</b></span>
+      <span class="rd-item">消息数：<b id="rdMsg">0</b></span>
+      <span class="rd-item">最近按键：<b id="rdLast">—</b></span>
+      <span class="rd-hint" id="rdHint"></span>
+    </div>
+  </div>
+
+  <!-- 宏录制区（v27 / S2）：独立整宽分区 -->
+  <div class="panel hud macro" id="cardMacro">
+    <i></i><i></i><i></i><i></i>
+    <h2><span class="dot"></span>宏录制区</h2>
+    <div class="hint">
+      录制 →（首次点击为起点）→ 操作 → <b>Pause 结束</b> → 点步骤改参数 → 回放。
+    </div>
+
+    <div class="macro-grid">
+      <!-- ① 录制 -->
+      <div class="trig-cell">
+        <div class="tc-title">① 录制</div>
+        <div class="tc-body" style="display:block">
+          <div class="mc-inline">
+            <button class="capbtn" id="macRecBtn" onclick="macToggleRecord()">开始录制</button>
+            <label for="macStart" style="margin-left:2px">起点</label>
+            <select id="macStart" title="起点决定「哪一刻算第 0 步」">
+              <option value="first_click" selected>首次点击开始</option>
+              <option value="countdown">3 秒后开始</option>
+              <option value="now">立即开始</option>
+            </select>
+          </div>
+          <label class="mc-check" for="macIgnoreInj">
+            <input type="checkbox" id="macIgnoreInj" checked>
+            忽略程序注入的按键
+          </label>
+          <div class="status" id="macRecStatus">未录制。</div>
+        </div>
+      </div>
+
+      <!-- ② 步骤（v30：可编辑的节点列表） -->
+      <div class="trig-cell">
+        <div class="tc-title">② 步骤（点一行可编辑）</div>
+        <div class="tc-body" style="display:block">
+          <div class="mc-stat">
+            <b id="macCount">0</b> 个步骤 · 约 <b id="macSecs">0.0</b> 秒 ·
+            点击 <b id="macClicks">0</b> · 按键 <b id="macKeys">0</b>
+          </div>
+          <div class="mc-steps" id="macSteps">
+            <div class="mc-empty">还没有步骤。录一段试试。</div>
+          </div>
+          <div class="mc-steps-more" id="macStepsMore"></div>
+          <div class="mc-inline" style="margin-top:6px">
+            <button onclick="macStepInsert()">＋ 插入等待</button>
+            <button onclick="macDiscard()">清空</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ 回放 -->
+      <div class="trig-cell">
+        <div class="tc-title">③ 回放</div>
+        <div class="tc-body" style="display:block">
+          <div class="mc-inline">
+            <label for="macSpeed">倍速</label>
+            <select id="macSpeed">
+              <option value="0.5">0.5x 慢放</option>
+              <option value="1" selected>1x 原速</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+              <option value="4">4x 快进</option>
+            </select>
+            <label for="macRepeat">次数</label>
+            <input id="macRepeat" type="number" min="1" max="9999" step="1" value="1">
+          </div>
+          <div class="mc-inline">
+            <button class="capbtn" id="macPlayBtn" onclick="macPlay()">开始回放</button>
+            <button id="macStopPlayBtn" onclick="macStopPlay()">停止回放</button>
+          </div>
+          <!-- v34：宏的启停键。回放一启动窗口就最小化让位，
+               没有热键就只能切回来点按钮，等于回放期间没法干预。 -->
+          <div class="status" id="macTrigHint" style="margin-top:6px">
+            启停键 <b id="macTrigKey">F7</b>：录制中收尾 · 回放中暂停 / 继续
+          </div>
+          <div class="status" id="macPlayStatus">未回放。</div>
+        </div>
+      </div>
+
+      <!-- ④ 保存 / 载入 -->
+      <div class="trig-cell">
+        <div class="tc-title">④ 保存 / 载入</div>
+        <div class="tc-body" style="display:block">
+          <div class="mc-inline">
+            <input id="macName" type="text" placeholder="宏名，如 每日签到"
+                   spellcheck="false" maxlength="64">
+            <button onclick="macSave()">保存</button>
+          </div>
+          <div class="mc-inline">
+            <select id="macList"></select>
+            <button onclick="macLoad()">载入</button>
+            <button onclick="macDelete()">删除</button>
+          </div>
+          <div class="status" id="macSaveStatus">宏存在设置目录的 macros/ 下。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 节点设置弹窗（v30）：照参考流程编辑器的形态——点列表里一行就打开它。
+     不用 window.prompt/confirm：pywebview 里有的平台会直接返回 undefined，
+     等于永远取消（删除确认那里已经踩过同一个坑）。 -->
+<div class="mc-modal" id="macModal">
+  <div class="mc-dialog">
+    <div class="mc-dh">
+      <b>节点设置</b>
+      <span id="mcNodeHead">当前节点：—</span>
+      <button class="mc-x" onclick="macCloseModal()" title="关闭">✕</button>
+    </div>
+
+    <div class="mc-field">
+      <label for="mcName">节点名称</label>
+      <input id="mcName" type="text" maxlength="32" spellcheck="false">
+    </div>
+
+    <div class="mc-two" id="mcXYRow">
+      <div class="mc-field">
+        <label for="mcX">X 轴</label>
+        <input id="mcX" type="number" step="1">
+      </div>
+      <div class="mc-field">
+        <label for="mcY">Y 轴</label>
+        <input id="mcY" type="number" step="1">
+      </div>
+    </div>
+
+    <div class="mc-field">
+      <label for="mcDelayType">延时类型</label>
+      <select id="mcDelayType">
+        <option value="fixed">固定延时</option>
+        <option value="random">随机延时</option>
+      </select>
+    </div>
+
+    <div class="mc-two">
+      <div class="mc-field">
+        <label for="mcDelay" id="mcDelayLabel">延时（毫秒）</label>
+        <input id="mcDelay" type="number" min="0" step="1" value="0">
+      </div>
+      <div class="mc-field" id="mcDelay2Wrap" style="display:none">
+        <label for="mcDelay2">到（毫秒）</label>
+        <input id="mcDelay2" type="number" min="0" step="1" value="0">
+      </div>
+    </div>
+    <div class="mc-tip">延时 = <b>这一步做完后等多久再做下一步</b>。1000 毫秒 = 1 秒。</div>
+
+    <div class="mc-field">
+      <label for="mcAfter">执行完成后</label>
+      <select id="mcAfter">
+        <option value="next">执行下一步</option>
+        <option value="end">结束宏</option>
+      </select>
+    </div>
+
+    <div class="mc-dfoot">
+      <button class="mc-danger" onclick="macStepDel()">删除</button>
+      <button onclick="macStepDup()">复制</button>
+      <button onclick="macStepMove(-1)">上移</button>
+      <button onclick="macStepMove(1)">下移</button>
+      <button class="primary" onclick="macStepSave()">确定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  function q(p){ return document.querySelector(p); }
+
+  function toast(sel, msg){
+    const el = $(sel);
+    el.innerHTML = msg;
+    el.className = "status live";
+    setTimeout(()=>{ el.className="status"; }, 1800);
+  }
+
+  /* ---------- 宏录制 / 回放（v27 / S2） ----------
+     进度靠轮询：pywebview 只有「前端问、后端答」，没有后端主动推，
+     所以录制中每 700ms 取一次摘要（只回条数/秒数/预览，不回事件本体，
+     几千条事件塞进 webview 会直接卡死界面）。 */
+  let macRecording = false, macPlaying = false;
+  let macDelArmed = 0;              // 删除的两步确认计时
+  let macStepVer = -1;              // 后端步骤版本（变了才重画列表）
+  let macStepCache = [], macStepTotal = 0, macEditIdx = -1;
+
+  async function macCall(name, ...args){
+    try{
+      return await window.pywebview.api[name](...args);
+    }catch(e){
+      // 【不空吞】以前这类 catch(e){} 让「点了没反应」查了三层才定位到
+      // （规则 36）。这里直接把异常写到状态行。
+      macSetStatus("macRecStatus", "调用失败：" + e, true);
+      return {ok:false, msg:String(e)};
+    }
+  }
+
+  function macSetStatus(id, msg, live){
+    const el = $(id);
+    if(!el) return;
+    el.textContent = msg || "";
+    el.className = live ? "status live" : "status";
+  }
+
+  function macFillList(names, pick){
+    const sel = $("macList");
+    const cur = pick || sel.value;
+    sel.innerHTML = "";
+    if(!names || !names.length){
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "（还没有保存的宏）"; o.disabled = true;
+      o.selected = true;
+      sel.appendChild(o);
+      return;
+    }
+    names.forEach(n => {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = n;
+      sel.appendChild(o);
+    });
+    if(cur && names.indexOf(cur) >= 0) sel.value = cur;
+  }
+
+  function macSetSpeed(v){
+    // select 的 value 是字符串，后端回的是 1.0 这样的 float；
+    // 直接赋值 "1.0" 匹配不上 "1" 这个 option，会选中空项。
+    const want = Number(v);
+    let best = null, bestDiff = 1e9;
+    for(const o of $("macSpeed").options){
+      const d = Math.abs(Number(o.value) - want);
+      if(d < bestDiff){ bestDiff = d; best = o.value; }
+    }
+    if(best !== null) $("macSpeed").value = best;
+  }
+
+  async function macRefreshList(pick){
+    const r = await macCall("macro_list");
+    if(r && r.ok) macFillList(r.names, pick);
+  }
+
+  async function macPoll(){
+    if(!window.pywebview || !window.pywebview.api) return;
+    let d;
+    try{ d = await window.pywebview.api.macro_status(); }
+    catch(e){ return; }
+    if(!d || !d.ok) return;
+
+    macRecording = !!d.recording;
+    macPlaying = !!d.playing;
+    $("macCount").textContent = d.count;
+    $("macSecs").textContent = Number(d.secs || 0).toFixed(1);
+    $("macClicks").textContent = d.clicks || 0;
+    $("macKeys").textContent = d.keys || 0;
+
+    $("macRecBtn").textContent = d.recording ? "停止录制" : "开始录制";
+    $("macPlayBtn").disabled = d.recording || d.playing;
+    $("macStopPlayBtn").disabled = !d.playing;
+
+    if(d.recording){
+      // v30：起点模式要能看出来。否则用户点完「开始录制」看界面没动静，
+      // 会以为坏了——其实它在等第一次点击。
+      const head = d.armed
+        ? ("等起点… 已等 " + Number(d.waited || 0).toFixed(1)
+           + " 秒（第一次点击即开始；按 Pause 取消）")
+        : ("录制中… 已记 " + d.count + " 条动作 / "
+           + Number(d.secs || 0).toFixed(1) + " 秒（按 Pause 结束）");
+      macSetStatus("macRecStatus", d.overflow || head, true);
+    }else if(d.overflow){
+      macSetStatus("macRecStatus", d.overflow, true);
+    }
+    if(d.playing){
+      // v34：暂停和卡顿必须分得开。回放中按启停键定住后，
+      // 界面还写「回放中」用户会以为程序死了。
+      macSetStatus("macPlayStatus",
+        d.paused
+          ? ("已暂停 · 再按 " + (d.trig || "启停键") + " 继续")
+          : ("回放中……按 " + (d.trig || "启停键") + " 暂停"),
+        true);
+    }
+    // 启停键名始终显示真键（降级后可能是 Ctrl+F7）：
+    // 写死 F7 会出现「照提示按了没反应」的老毛病（2026-10-15 实测过）。
+    if(d.trig) $("macTrigKey").textContent = d.trig;
+    if(d.name) $("macName").value = d.name;
+
+    // 步骤列表只在版本变了才重画：700ms 一次全量重绘会把用户
+    // 正指着的那一行刷走（表现是「列表点不中」）。
+    if((d.step_ver | 0) !== macStepVer) macSyncSteps();
+  }
+
+  const MAC_KIND_CN = {click:"点击", down:"按住", up:"松开", key:"按键",
+                       wheel:"滚轮", hwheel:"横滚", move:"移动", wait:"等待"};
+
+  function macEsc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, c => (
+      {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  async function macSyncSteps(){
+    let d;
+    try{ d = await window.pywebview.api.macro_steps(0, 300); }
+    catch(e){ macSetStatus("macRecStatus", "步骤读取失败：" + e, true); return; }
+    if(!d || !d.ok) return;
+    macStepVer = d.step_ver | 0;
+    macStepCache = d.items || [];
+    macStepTotal = d.total || 0;
+    const box = $("macSteps");
+    if(!macStepTotal){
+      box.innerHTML = '<div class="mc-empty">还没有步骤。录一段试试。</div>';
+      $("macStepsMore").textContent = "";
+      return;
+    }
+    box.innerHTML = macStepCache.map(it => {
+      const delay = Number(it.delay2 || 0) > Number(it.delay || 0)
+        ? (it.delay + "~" + it.delay2 + "ms") : (it.delay + "ms");
+      const endMark = it.after === "end" ? " ⏹" : "";
+      return '<div class="mc-step' + (it.i === macEditIdx ? " sel" : "")
+        + '" onclick="macEditStep(' + it.i + ')">'
+        + '<span class="ms-i">' + it.i + '</span>'
+        + '<span class="ms-l">' + macEsc(it.label || MAC_KIND_CN[it.k] || it.k)
+        + endMark + '</span>'
+        + '<span class="ms-d">' + macEsc(delay) + '</span></div>';
+    }).join("");
+    $("macStepsMore").textContent = macStepTotal > macStepCache.length
+      ? ("还有 " + (macStepTotal - macStepCache.length) + " 步未显示（列表只画前 300 条）")
+      : "";
+  }
+
+  async function macEditStep(i){
+    if(macRecording || macPlaying){
+      macSetStatus("macRecStatus", "录制 / 回放中不能编辑步骤", true);
+      return;
+    }
+    let it = macStepCache.find(x => x.i === i);
+    if(!it){ await macSyncSteps(); it = macStepCache.find(x => x.i === i); }
+    if(!it) return;
+    macEditIdx = i;
+    $("mcNodeHead").textContent = "当前节点：" + i + "（共 " + macStepTotal + " 步）";
+    $("mcName").value = it.name || "";
+    const hasXY = (it.k === "click" || it.k === "down" || it.k === "move");
+    $("mcXYRow").style.display = hasXY ? "grid" : "none";
+    if(hasXY){
+      $("mcX").value = (it.x != null ? it.x : 0);
+      $("mcY").value = (it.y != null ? it.y : 0);
+    }
+    const rand = Number(it.delay2 || 0) > Number(it.delay || 0);
+    $("mcDelayType").value = rand ? "random" : "fixed";
+    $("mcDelay2Wrap").style.display = rand ? "flex" : "none";
+    $("mcDelay").value = it.delay || 0;
+    $("mcDelay2").value = it.delay2 || 0;
+    $("mcAfter").value = it.after === "end" ? "end" : "next";
+    $("macModal").classList.add("show");
+    macSyncSteps();
+  }
+
+  function macCloseModal(){
+    $("macModal").classList.remove("show");
+    macEditIdx = -1;
+    macSyncSteps();
+  }
+
+  async function macStepSave(){
+    if(macEditIdx < 0){ macCloseModal(); return; }
+    const patch = {
+      name: ($("mcName").value || "").trim(),
+      delay: parseInt($("mcDelay").value, 10) || 0,
+      delay2: $("mcDelayType").value === "random"
+              ? (parseInt($("mcDelay2").value, 10) || 0) : 0,
+      after: $("mcAfter").value,
+    };
+    if($("mcXYRow").style.display !== "none"){
+      patch.x = parseInt($("mcX").value, 10) || 0;
+      patch.y = parseInt($("mcY").value, 10) || 0;
+    }
+    const r = await macCall("macro_step_set", macEditIdx, patch);
+    macSetStatus("macRecStatus", r.msg, true);
+    if(r.ok){ macCloseModal(); return; }
+  }
+
+  async function macStepDel(){
+    if(macEditIdx < 0) return;
+    const r = await macCall("macro_step_del", macEditIdx);
+    macSetStatus("macRecStatus", r.msg, true);
+    if(r.ok) macCloseModal();
+  }
+
+  async function macStepDup(){
+    if(macEditIdx < 0) return;
+    const r = await macCall("macro_step_dup", macEditIdx);
+    macSetStatus("macRecStatus", r.msg, true);
+    if(r.ok) macCloseModal();
+  }
+
+  async function macStepMove(delta){
+    if(macEditIdx < 0) return;
+    const r = await macCall("macro_step_move", macEditIdx, delta);
+    macSetStatus("macRecStatus", r.msg, true);
+    if(r.ok) macCloseModal();
+  }
+
+  async function macStepInsert(){
+    const r = await macCall("macro_step_insert", macStepTotal, "wait", 500);
+    macSetStatus("macRecStatus", r.msg, true);
+    if(r.ok){ macStepVer = -1; await macSyncSteps(); macEditStep(r.index); }
+  }
+
+  // 弹窗点遮罩关闭（点对话框本身不关）
+  $("macModal").addEventListener("click", (e)=>{
+    if(e.target && e.target.id === "macModal") macCloseModal();
+  });
+  $("mcDelayType").addEventListener("change", ()=>{
+    $("mcDelay2Wrap").style.display =
+      $("mcDelayType").value === "random" ? "flex" : "none";
+  });
+
+  async function macToggleRecord(){
+    if(macRecording){
+      const r = await macCall("macro_stop_record");
+      macSetStatus("macRecStatus", r.msg, true);
+    }else{
+      // v30：起点模式一起送过去。默认「首次点击」——
+      // 点完「开始录制」到切进目标程序之间的点击/移动不会被录进来。
+      const mode = $("macStart").value || "first_click";
+      const r = await macCall("macro_start_record", $("macIgnoreInj").checked,
+                              mode, 3);
+      macSetStatus("macRecStatus", r.msg, true);
+    }
+    await macPoll();
+  }
+
+  async function macDiscard(){
+    const r = await macCall("macro_discard");
+    macSetStatus("macRecStatus", r.msg, true);
+    await macPoll();
+  }
+
+  async function macPlay(){
+    const speed = parseFloat($("macSpeed").value) || 1;
+    const rep = parseInt($("macRepeat").value, 10) || 1;
+    const r = await macCall("macro_play", speed, rep);
+    macSetStatus("macPlayStatus", r.msg, true);
+    await macPoll();
+  }
+
+  async function macStopPlay(){
+    const r = await macCall("macro_stop_play");
+    macSetStatus("macPlayStatus", r.msg, true);
+    await macPoll();
+  }
+
+  async function macSave(){
+    const name = ($("macName").value || "").trim();
+    if(!name){ macSetStatus("macSaveStatus", "先给宏起个名字", true); return; }
+    const speed = parseFloat($("macSpeed").value) || 1;
+    const rep = parseInt($("macRepeat").value, 10) || 1;
+    const r = await macCall("macro_save", name, speed, rep);
+    macSetStatus("macSaveStatus", r.msg, true);
+    if(r.ok && r.names) macFillList(r.names, name);
+  }
+
+  async function macLoad(){
+    const name = $("macList").value;
+    if(!name){ macSetStatus("macSaveStatus", "下拉里还没有宏", true); return; }
+    const r = await macCall("macro_load", name);
+    macSetStatus("macSaveStatus", r.msg, true);
+    if(r.ok){
+      if(r.speed != null) macSetSpeed(r.speed);
+      if(r.repeat != null) $("macRepeat").value = r.repeat;
+      await macPoll();
+    }
+  }
+
+  async function macDelete(){
+    const name = $("macList").value;
+    if(!name){ macSetStatus("macSaveStatus", "下拉里还没有宏", true); return; }
+    // 两步确认：不用 window.confirm —— pywebview 不同平台下
+    // 有的会直接返回 undefined（等于永远取消），有的弹窗会卡住界面。
+    const now = Date.now();
+    if(now - macDelArmed > 3000){
+      macDelArmed = now;
+      macSetStatus("macSaveStatus",
+        "再点一次「删除」确认删掉「" + name + "」（3 秒内有效）", true);
+      return;
+    }
+    macDelArmed = 0;
+    const r = await macCall("macro_delete", name);
+    macSetStatus("macSaveStatus", r.msg, true);
+    if(r.names) macFillList(r.names);
+  }
+
+  /* ---------- 自绘标题栏：拖动 + 窗口控制 ----------
+     【v31 改自研拖动】原来把拖动交还 Windows（ReleaseCapture +
+     WM_NCLBUTTONDOWN(HTCAPTION)），实测在这个窗口上完全不动：
+     WebView2 子窗口持有鼠标捕获，系统的拖动循环收不到 mousemove。
+     现在改成「前端抓指针、后端 SetWindowPos」：
+       pointerdown → title_drag_begin（记下窗口矩形与鼠标起点）
+       pointermove → title_drag_move（算位移，后端搬窗口）
+       pointerup   → title_drag_end
+     用 pointer 事件 + setPointerCapture，鼠标甩出窗口也不丢。 */
+  let dragPid = null, dragEl = null, dragDpr = 1, dragLastT = 0;
+  function tbDown(e){
+    if(e.button !== 0) return;
+    if(e.target.closest(".tb-btn")) return;      // 按钮不参与拖动
+    dragPid = e.pointerId;
+    dragEl = e.currentTarget;
+    dragDpr = window.devicePixelRatio || 1;
+    try{ dragEl.setPointerCapture(dragPid); }catch(err){}
+    window.pywebview.api.title_drag_begin(e.screenX, e.screenY, dragDpr);
+  }
+  function tbMove(e){
+    if(dragPid === null || e.pointerId !== dragPid) return;
+    const now = performance.now();
+    if(now - dragLastT < 12) return;             // 60fps 够用，别再密了
+    dragLastT = now;
+    window.pywebview.api.title_drag_move(e.screenX, e.screenY);
+  }
+  function tbUp(e){
+    if(dragPid === null || (e && e.pointerId !== dragPid)) return;
+    try{ dragEl && dragEl.releasePointerCapture(dragPid); }catch(err){}
+    dragPid = null; dragEl = null;
+    window.pywebview.api.title_drag_end();
+  }
+  document.getElementById("titlebar").addEventListener("pointerdown", tbDown);
+  window.addEventListener("pointermove", tbMove);
+  window.addEventListener("pointerup", tbUp);
+  window.addEventListener("pointercancel", tbUp);
+  // 标题栏双击 = 最大化/还原，和Windows 习惯一致。
+  // 注意要排除标题栏上的按钮：双击关闭按钮不该是「最大化」。
+  window.addEventListener("dblclick", (e)=>{
+    if(e.target.closest(".tb-btn")) return;
+    if(!e.target.closest("#titlebar")) return;
+    window.pywebview.api.title_maximize().then(syncMaxIcon);
+  });
+  async function winMin(){ await window.pywebview.api.title_minimize(); }
+  async function winMax(){
+    await window.pywebview.api.title_maximize();
+    // 后端是阻塞式切换的，等一小会儿再问状态，图标才跟得上
+    setTimeout(syncMaxIcon, 120);
+  }
+  async function winClose(){ await window.pywebview.api.title_close(); }
+
+  /* ---------- 边框缩放（v31 自研） ----------
+     和拖动同一套：pointerdown 记基准，pointermove 算新矩形，
+     后端 SetWindowPos。不再依赖系统模态缩放循环。
+     节流 12ms：IPC 每帧一次就够，过密反而拖不动。 */
+  let rzPid = null, rzEl = null, rzDpr = 1, rzLastT = 0;
+  async function rzDown(e, edge){
+    if(e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    if(rzPid !== null) return;
+    rzPid = e.pointerId;
+    rzEl = e.currentTarget;
+    rzDpr = window.devicePixelRatio || 1;
+    try{ rzEl.setPointerCapture(rzPid); }catch(err){}
+    const r = await window.pywebview.api.title_resize(edge, e.screenX,
+                                                      e.screenY, rzDpr);
+    if(!r || !r.ok){ rzUp(); }
+  }
+  function rzMove(e){
+    if(rzPid === null || e.pointerId !== rzPid) return;
+    const now = performance.now();
+    if(now - rzLastT < 12) return;
+    rzLastT = now;
+    window.pywebview.api.title_resize_move(e.screenX, e.screenY);
+  }
+  function rzUp(e){
+    if(rzPid === null) return;
+    try{ rzEl && rzEl.releasePointerCapture(rzPid); }catch(err){}
+    rzPid = null; rzEl = null;
+    window.pywebview.api.title_resize_end();
+    setTimeout(syncMaxIcon, 60);
+  }
+  window.addEventListener("pointermove", rzMove);
+  window.addEventListener("pointerup", rzUp);
+  window.addEventListener("pointercancel", rzUp);
+
+  //最大化后给「还原」按钮换个图标（双矩形），不然用户不知道当前状态。
+  // 同时给 body 加 .maxed：最大化时隐藏边框热区，
+  // 否则拖窗口边缘会触发「还原 + 缩放」这种反直觉行为
+  //（Windows 原生窗口也是最大化后不能拖边框）。
+  //
+  // 【为什么不用 IsZoomed 判断】后端是自己SetWindowPos 改矩形的，
+  // 系统维护的 maximized 标志位不会跟着变，IsZoomed 永远是 False。
+  // 后端已经改成「比对矩形和屏幕工作区」，这里只管把结果显示出来。
+  async function syncMaxIcon(){
+    try{
+      const r = await window.pywebview.api.is_maximized();
+      $("btnMax").innerHTML = r.maximized
+        ? '<svg width="11" height="11" viewBox="0 0 11 11">'
+          + '<rect x="0" y="2.2" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2"/>'
+          + '<path d="M3.4 2.2 V0.5 H11 V8 H9.2" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>'
+        : '<svg width="11" height="11" viewBox="0 0 11 11">'
+          + '<rect x="0.5" y="0.5" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>';
+      $("btnMax").title = r.maximized ? "还原" : "最大化";
+      document.body.classList.toggle("maxed", !!r.maximized);
+    }catch(e){}
+  }
+  // 既听resize 事件，也定时查一次：
+  // 最大化是我们自己改矩形的，不一定会触发 WebView2 的 resize 事件，
+  // 只靠事件会让按钮图标停在旧状态。
+  window.addEventListener("resize", ()=>{ syncMaxIcon(); });
+
+  async function initButtons(list){
+    const s = $("mBtn");
+    // 【关键】每次重建前必须清空，否则选项会一次次累积
+    // （bootstrap 和 addMouse 都会调这里，不清空就变成两份、三份）
+    const keep = s.value;
+    s.innerHTML = "";
+    list.forEach(b=>{
+      const o = document.createElement("option");
+      o.value = b.id; o.textContent = b.name; s.appendChild(o);
+    });
+    if(keep) s.value = keep;      // 尽量保留用户当前选择
+  }
+
+  /* 【两段式·2026-10-15】按钮只装填参数进入就绪态，不再直接启动。
+     主人原话：「设定好参数以后点启动应该是准备就绪，然后按鼠标连点
+     启停键（默认 F5）再开始」。旧代码点按钮即启动，第一次按 F5
+     被当成「停止正在跑的任务」——就是「点第一次 F5 就暂停」。
+     后端 arm_mouse 只存参数 + 置 mouse_armed，不起引擎；
+     真启动由 toggle_mouse（F5 热键）完成，且此时仪表盘自动让位。 */
+  async function startMouse(){
+    const r = await window.pywebview.api.arm_mouse({
+      button: $("mBtn").value, action: $("mAct").value,
+      count: $("mCount").value, duration: $("mDur").value, cps: $("mCps").value,
+      jitter: $("mJitter").value, mode: $("mMode").value,
+      pos: $("mPos").value, countdown: $("mCd").value,
+      jig: $("mJig").value, done: $("mDone").value
+    }, $("mHide").checked);
+    toast("mStatus", r.msg);
+    saveSettings();
+  }
+
+  /* 鼠标区几行的联动显隐（v22 + v23）：
+     · 固定坐标模式才显示坐标行
+     · 长按不支持倒计时和固定坐标（长按路径不走连点引擎）——
+       禁用而不是隐藏：隐藏会让用户以为这个功能消失了。
+     · v23：抖器动作才显示「挪动间隔」；长按不支持收尾动作
+       （press/release 路径没有自然完成事件），禁用并归零。
+     · v23：抖器不支持启动倒计时（它不点任何东西、也不需要切前台），
+       禁用并归零——不做「收了参数却不用」的静默忽略。
+     【为什么不用 style.display 读内联值判断状态】v20 踩过的坑：
+     内联 style.display 初始是空串不是 "block"，读它判断开关会把
+     第一次点击判成「没开」。这里只写不读，没有判断问题。
+     · v26：坐标输入框跟着点击位置走——fixed 显示单行（mPosRow），
+       multi/box 显示多行（mPointsRow），两者互斥不同时出现；
+       长按不点任何位置，两个都藏掉。 */
+  function syncMouseRows(){
+    const act = $("mAct").value;
+    const hold = act === "hold";
+    const jig = act === "jiggle";
+    const mode = $("mMode").value;
+    const fixed = mode === "fixed";
+    const multi = (mode === "multi" || mode === "box");
+    $("mPosRow").style.display = (fixed && !hold) ? "" : "none";
+    $("mPointsRow").style.display = (multi && !hold) ? "" : "none";
+    $("mPoints").disabled = hold;
+    $("mCd").disabled = hold || jig;
+    if(hold || jig) $("mCd").value = "0";
+    $("mMode").disabled = hold;
+    $("mJigRow").style.display = jig ? "" : "none";
+    $("mDone").disabled = hold;
+    if(hold) $("mDone").value = "none";
+  }
+
+  /* 「取当前」：让后端读真实鼠标坐标填进输入框。
+     DPI 缩放在网页里算坐标会偏，必须问后端（GetCursorPos）。 */
+  async function recordPos(){
+    const r = await window.pywebview.api.cursor_pos();
+    if(r && r.ok){
+      const pt = r.x + "," + r.y;
+      // v26：多点/框内模式下「取当前」应该是**追加一行**（逐个点位录），
+      // 固定坐标模式才是覆盖。同一个按钮两种语义，靠当前模式判断。
+      const mode = $("mMode").value;
+      if(mode === "multi" || mode === "box"){
+        const cur = $("mPoints").value.replace(/\s+$/,"");
+        $("mPoints").value = (cur ? cur + "\n" : "") + pt;
+        toast("mStatus", "已追加坐标 " + pt + "（共 "
+              + $("mPoints").value.split("\n").filter(s=>s.trim()).length + " 个）");
+      }else{
+        $("mPos").value = pt;
+        toast("mStatus", "已记录当前坐标 " + pt);
+      }
+    }else{
+      toast("mStatus", "取坐标失败：" + ((r && r.msg) || "未知错误"));
+    }
+  }
+  /* v26：清空坐标列表（录错了重来；不一次清一个，挂着机没人愿意逐行删） */
+  function clearPoints(){
+    $("mPoints").value = "";
+    toast("mStatus", "坐标列表已清空");
+  }
+  async function stopMouse(){
+    const r = await window.pywebview.api.stop_mouse();
+    toast("mStatus", r.msg);
+  }
+
+  /* v23 S4：取消待执行的收尾动作（完成后动作倒计时中可点）。 */
+  async function cancelDone(){
+    const r = await window.pywebview.api.cancel_done_action();
+    toast("mStatus", r.msg || "已处理");
+  }
+
+  /* ---- 自定义鼠标键：两步式识别 ----
+     第一步「开始识别」清空历史按键记录，
+     第二步「完成」提交。一次性做法会读到几秒前的旧按键，
+     所以用户必须先按侧键、再点按钮，顺序不能反。 */
+  async function armMouse(){
+    const r = await window.pywebview.api.arm_custom_mouse();
+    $("armBtn").disabled = true;
+    $("addBtn").classList.add("pulse");
+    $("addBtn").disabled = false;
+    $("mStatus").innerHTML = r.msg;
+    $("mStatus").className = "status live";
+    // 8 秒后自动收尾，防止用户按了侧键忘记点完成
+    setTimeout(()=>{
+      $("armBtn").disabled = false;
+      $("addBtn").classList.remove("pulse");
+    }, 8000);
+  }
+  async function addMouse(){
+    const r = await window.pywebview.api.add_custom_mouse("");
+    $("armBtn").disabled = false;
+    $("addBtn").classList.remove("pulse");
+    // 后端现在返回 {ok, msg, buttons}，不再是裸数组
+    if(r.buttons) await initButtons(r.buttons);
+    $("mStatus").innerHTML = r.msg;
+    $("mStatus").className = r.ok ? "status live" : "status";
+  }
+
+  /* ---- 触发键：按一下就绑，替代只能选三项的下拉框 ----
+     后端 arm_trigger_capture() 亮起等待，Raw Input 线程收到
+     「刚按下」的事件后记下编号，这里轮询取走结果并立刻绑定。
+     用 seq 做「只处理新结果」的判据：不给seq 的话每轮轮询都会
+     把上一个键重复绑一遍。 */
+  let trigArmed = false;
+  let trigSeq = 0;
+  let trigTimer = 0;
+  const TRIG_TIMEOUT_MS = 8000;
+  /* v29：超时提示。后端 _CAPTURE_TIMEOUT_MSG 里有同一句，
+     两边都写是为了「桥断了、后端没回话」时也能给用户一句人话。 */
+  const TRIG_TIMEOUT_TXT = "没收到任何标准鼠标键，请检查鼠标模式/驱动："
+    + "① 优先用有线或 2.4G（蓝牙模式常把侧键报成键盘/多媒体事件）；"
+    + "② 官方驱动里把侧键设为「鼠标按键 4/5」，不要设成键盘按键或宏；"
+    + "③ 先试中键——中键能绑，就说明是侧键上报的问题。";
+
+  function trigNote(msg, bad){
+    const n = $("hkNote");
+    n.innerHTML = msg;
+    n.className = "hint tiny";
+    n.style.color = bad ? "var(--spark)" : "var(--accent-mint)";
+  }
+
+  async function armTriggerCapture(){
+    const act = $("hotKeyAct").value;
+    trigArmed = true;
+    const btn = $("capTrigBtn");
+    btn.classList.add("pulse");
+    btn.textContent = "请按下鼠标键…";
+    await window.pywebview.api.arm_trigger_capture();
+    trigNote("正在等待：请按下要绑定的鼠标键"
+      + "（中键或任意侧键 G1~G8；左键/右键不可用）。"
+      + "8 秒内没有按键会自动取消，按 Esc 也可取消。", false);
+    // 前端定时器只是兜底：真超时由后端判（raw_diag 的 armed 会变 False）。
+    // 到点主动问一次，把后端给的原因原样显示出来。
+    clearTimeout(trigTimer);
+    trigTimer = setTimeout(function(){ pollTriggerCapture(true); },
+                           TRIG_TIMEOUT_MS + 300);
+  }
+  function disarmTrigger(){
+    trigArmed = false;
+    // 不清定时器的话，成功绑定 8 秒后还会再刷一条超时提示
+    clearTimeout(trigTimer);
+    const btn = $("capTrigBtn");
+    btn.classList.remove("pulse");
+    btn.textContent = "按下要绑的键";
+    window.pywebview.api.cancel_trigger_capture();
+  }
+  async function pollTriggerCapture(force){
+    if(!trigArmed && !force) return;
+    let r = null;
+    try{ r = await window.pywebview.api.take_captured_key(trigSeq); }
+    catch(e){ r = null; }
+    if(r && r.got){
+      trigSeq = r.seq;
+      disarmTrigger();
+      if(r.timeout){
+        // 后端判的超时：原文照抄，含「消息收到几条」这种细节
+        trigNote(r.msg || TRIG_TIMEOUT_TXT, true);
+        return;
+      }
+      if(!r.ok){
+        // 比如用户按了左键 —— 明确告诉用户不能用，而不是静默失败
+        trigNote(r.msg || "这个键不能用作触发键", true);
+        return;
+      }
+      const act = $("hotKeyAct").value;
+      const b = await window.pywebview.api.bind_captured_key(r.raw_id, act);
+      trigNote(b.msg || r.msg, !b.ok);
+      await refreshHotkeys();
+      return;
+    }
+    // 到点还没结果（后端没跑 tick / 桥断了）：前端兜底收场。
+    // 不能让「请按下鼠标键…」一直挂着 —— 下一次点左键就会被录进来。
+    if(force && trigArmed){
+      disarmTrigger();
+      trigNote(TRIG_TIMEOUT_TXT, true);
+    }
+  }
+  async function clearTrigKey(){
+    const r = await window.pywebview.api.set_button_hotkey("", "");
+    toast("mStatus", r.msg);
+    await refreshHotkeys();
+  }
+  async function refreshHotkeys(){
+    try{
+      const b = await window.pywebview.api.button_hotkeys();
+      const h = await window.pywebview.api.hotkey_text();
+      // 显示两类触发方式：系统热键（可能被占）+ 鼠标键（几乎不会冲突）
+      // 鼠标键优先显示 —— 它才是那条永远不会被抢占的通道。
+      //
+      // 【关键】读 by_action 而不是 labels：
+      // 界面问的是「鼠标连点现在绑的是哪个键」，这是按**动作**查；
+      // labels 是按**按键名**索引的，拿 labels.mouse 永远取不到，
+      // 于是回退显示系统热键 F5 —— 「绑了 G2 触发方式还显示 F5」
+      // 就是这么来的（后端已按动作返回 by_action）。
+      const by = b.by_action || {};
+      const mBtn = (by.mouse && by.mouse.label) || h.mouse_pretty
+                   || h.mouse || "未绑定";
+      const kBtn = (by.key && by.key.label) || h.key_pretty
+                   || h.key || "未绑定";
+      $("hkMouse").textContent = mBtn;
+      $("hkKey2").textContent  = kBtn;
+      // v34：宏启停键同样是「绑了鼠标键就报鼠标键，没绑才回落系统热键」
+      const cBtn = (by.macro && by.macro.label) || h.macro_pretty
+                   || h.macro || "未绑定";
+      $("hkMacro").textContent = cBtn;
+      // 卡片里的提示文案同步成实际生效的键：
+      // 2026-10-15 实测本机 F5/F6 被其他软件占用（RegisterHotKey 1409），
+      // 程序自动降级到 F8/F9，但文案写死常量——用户按 F6 没反应
+      // 还以为程序坏了。真键以 hotkey_text 返回的 pretty 为准。
+      // 提示里写「用户真正会按的那个键」：绑了鼠标键就显示中键/侧键，
+      // 没绑才回落 F8/F9 这类系统热键。
+      if(h.mouse_trigger && $("hintMouseKey"))
+        $("hintMouseKey").textContent = h.mouse_trigger;
+      else if(h.mouse_pretty && $("hintMouseKey"))
+        $("hintMouseKey").textContent = h.mouse_pretty;
+      if(h.key_trigger && $("hintKeyKey"))
+        $("hintKeyKey").textContent = h.key_trigger;
+      else if(h.key_pretty && $("hintKeyKey"))
+        $("hintKeyKey").textContent = h.key_pretty;
+      // 降级说明必须上界面：这是「按提示的键没反应」的唯一线索
+      const notes = [h.note_mouse, h.note_key, h.note_macro].filter(x=>x);
+      if(notes.length){
+        $("hkNote").innerHTML = "⚠ " + notes.join("；");
+        $("hkNote").className = "hint tiny warn";
+      }else if(!$("hkNote").innerHTML){
+        $("hkNote").innerHTML = "两种触发方式任选其一，按哪个都行。";
+        $("hkNote").className = "hint tiny";
+      }
+    }catch(e){}
+  }
+
+  // ---- 全局暂停 / 恢复 ----
+  // 暂停 ≠ 停止：动作定住、参数保留、一个事件都不注入。
+  // 游戏里按 Pause 键（或右上角这个按钮）即可定住画面，
+  // 再按一次原地恢复 —— 不用切回仪表盘重设参数。
+  // 弹窗提示由后端发（游戏全屏时仪表盘看不到，弹窗才看得到）。
+
+  /* API 调用失败必须露出来。
+     【2026-10-16 主人反馈「点了没反应、也不弹窗」的帮凶】
+     原来这里（以及别处）是 catch(e){} 一把吞掉：后端一旦抛异常
+     （那次是 NameError），按钮文字不变、没有通知、控制台也不看，
+     界面上**一点痕迹都没有**，只能靠猜。
+     现在把错误原样贴到 hkNote 上，同时写 console。 */
+  function apiFail(e, what){
+    const msg = (e && (e.message || e.toString())) || "未知错误";
+    const n = $("hkNote");
+    if(n){
+      n.innerHTML = "⚠ " + what + "失败：" + msg;
+      n.className = "hint tiny warn";
+      n.style.color = "";
+    }
+    try{ console.error("[api] " + what + " 失败", e); }catch(_){}
+  }
+
+  // 【防抖 · 2026-10-17 主人实测】暂停/恢复是个「切换」动作，
+  // 而连点/双击会触发两次 click —— 第一次恢复、第二次又暂停，
+  // 净效果为零。主人报的原话：「鼠标区和键盘区都暂停的时候，点那个
+  // 全局恢复运行/暂停按钮无论如何都不会恢复」（真因就是双击/连点）。
+  // 600ms 内的第二次点击直接忽略。
+  let _pauseBtnTs = 0;
+  async function togglePause(){
+    const nowTs = Date.now ? Date.now() : 0;
+    if (nowTs && nowTs - _pauseBtnTs < 600) return;
+    _pauseBtnTs = nowTs;
+    try{
+      const r = await window.pywebview.api.toggle_pause();
+      $("pauseBtn").textContent = r.paused ? "恢复运行" : "暂停";
+      $("pauseBtn").classList.toggle("paused", !!r.paused);
+      $("hkNote").innerHTML = r.msg;
+      $("hkNote").className = "hint tiny";
+      $("hkNote").style.color = r.paused ? "var(--spark)" : "var(--accent-mint)";
+    }catch(e){ apiFail(e, "暂停/恢复"); }
+  }
+
+  // 暂停热键显示名（后端传回 pause/scrolllock/ctrl+pause 这类字符串）
+  function prettyPauseKey(k){
+    if(!k) return "未注册";
+    const map = {pause:"Pause", scrolllock:"Scroll Lock",
+                 "ctrl+pause":"Ctrl + Pause"};
+    return map[k] || k;
+  }
+
+  /* ---- 系统热键改绑：同样「按一下就录」 ----
+     捕获在网页里做（keydown），所以录的是真实按下组合，
+     不用手打字符串也就不会打错键名。
+     注意：捕获期间必须 preventDefault，否则 F5 会刷新页面、
+     F12 会弹出开发者工具。 */
+  let sysArmed = false;
+  async function armSysCapture(){
+    sysArmed = true;
+    const btn = $("capSysBtn");
+    btn.classList.add("pulse");
+    btn.textContent = "请按键…";
+    $("hkNote").innerHTML = "正在等待：请按下要用的系统热键"
+      + "（可带 Ctrl / Alt / Shift）。按 Esc 取消。";
+    $("hkNote").style.color = "var(--accent-mint)";
+  }
+  function disarmSys(){
+    sysArmed = false;
+    const btn = $("capSysBtn");
+    btn.classList.remove("pulse");
+    btn.textContent = "按一下录入";
+  }
+  function keyComboText(e){
+    // 把键盘事件拼成后端认得的字符串：ctrl+shift+f8
+    const parts = [];
+    if(e.ctrlKey) parts.push("ctrl");
+    if(e.altKey)  parts.push("alt");
+    if(e.shiftKey) parts.push("shift");
+    if(e.metaKey) parts.push("win");
+    let k = e.key;
+    if(k === " ") k = "space";
+    else if(k === "Escape") k = "esc";
+    else if(k && k.length === 1) k = k.toLowerCase();
+    if(!k || ["Control","Alt","Shift","Meta"].includes(k)) return "";
+    parts.push(k.toLowerCase());
+    return parts.join("+");
+  }
+  async function applySysCapture(e){
+    const combo = keyComboText(e);
+    if(!combo) return;            // 只按了修饰键，等真正的键
+    const act = $("hotKeySysAct").value;
+    disarmSys();
+    const r = await window.pywebview.api.set_system_hotkey(act, combo);
+    $("hkNote").innerHTML = r.msg;
+    $("hkNote").style.color = r.ok ? "var(--accent-mint)" : "var(--spark)";
+    await refreshHotkeys();
+  }
+  async function clearSysHotkey(){
+    const act = $("hotKeySysAct").value;
+    const r = await window.pywebview.api.clear_system_hotkey(act);
+    $("hkNote").innerHTML = r.msg;
+    $("hkNote").style.color = r.ok ? "var(--accent-mint)" : "var(--spark)";
+    await refreshHotkeys();
+  }
+
+  // 捕获期间全局拦 keydown：Esc 取消，其余按键转成组合字符串
+  window.addEventListener("keydown", (e)=>{
+    if(sysArmed){
+      e.preventDefault(); e.stopPropagation();
+      if(e.key === "Escape"){ disarmSys(); refreshHotkeys(); return; }
+      applySysCapture(e);
+      return;
+    }
+    if(keyCapArmed){
+      e.preventDefault(); e.stopPropagation();
+      if(e.key === "Escape"){ disarmKeyCap(); return; }
+      addKeyChip(keyComboText(e));
+      return;
+    }
+    if(trigArmed && e.key === "Escape"){ disarmTrigger(); }
+  }, true);
+  /* ---- 生效按键：按键捕获 + 筹码显示 ----
+     【为什么不做成下拉】要绑的键有 104 个，加上 Ctrl/Alt/Shift 组合是几百种，
+     下拉选一次得点十几次，比手打还慢；而且游戏里用的可能是
+     小键盘/方向键区扩展键，下拉根本列不全。
+     改成「按一下就录」：录进去的是一个字符串（w / ctrl+shift+w），
+     多键用逗号分隔，界面上显示成一排筹码，点 × 单独删。 */
+  let keyCapArmed = false;
+  function prettyCombo(text){
+    if(!text) return "";
+    return text.split("+").map(p=>{
+      p = p.trim();
+      const low = p.toLowerCase();
+      if(low === "ctrl") return "Ctrl";
+      if(low === "shift") return "Shift";
+      if(low === "alt") return "Alt";
+      if(low === "win") return "Win";
+      if(low === "space") return "Space";
+      if(low === "esc") return "Esc";
+      if(low === "enter") return "Enter";
+      if(low === "tab") return "Tab";
+      if(low === "backspace") return "Bksp";
+      if(low === "delete") return "Del";
+      if(low === "insert") return "Ins";
+      if(low === "pageup") return "PgUp";
+      if(low === "pagedown") return "PgDn";
+      if(low === "arrowup") return "↑";
+      if(low === "arrowdown") return "↓";
+      if(low === "arrowleft") return "←";
+      if(low === "arrowright") return "→";
+      if(low.startsWith("f") && low.slice(1).match(/^\d+$/)) return low.toUpperCase();
+      if(low.startsWith("num") && low.slice(3).match(/^\d+$/)) return "Num" + low.slice(3);
+      return p.length === 1 ? p.toUpperCase() : p;
+    }).join(" + ");
+  }
+  function keyList(){
+    return $("kKeys").value.split(",").map(s=>s.trim()).filter(Boolean);
+  }
+  function setKeyList(list){
+    $("kKeys").value = list.join(",");
+    renderKeyChips();
+    saveSettings();
+  }
+  function renderKeyChips(){
+    const wrap = $("keyCapWrap");
+    // 只删掉旧的筹码，保留输入框和两个按钮
+    wrap.querySelectorAll(".capchip").forEach(n=>n.remove());
+    keyList().forEach((k, i)=>{
+      const s = document.createElement("span");
+      s.className = "capchip";
+      // textContent 用于按键名（避免用户输入被当 HTML 解析）
+      s.appendChild(document.createTextNode(prettyCombo(k)));
+      const x = document.createElement("span");
+      x.className = "x";
+      x.textContent = "×";
+      x.title = "删除这个键";
+      x.onclick = ()=>{
+        const l = keyList();
+        l.splice(i, 1);
+        setKeyList(l);
+      };
+      s.appendChild(x);
+      wrap.appendChild(s);
+    });
+  }
+  function addKeyChip(combo){
+    if(!combo) return;
+    disarmKeyCap();
+    const l = keyList();
+    // 已经录过就不重复加，避免不小心按两次导致同一键出现两遍
+    if(l.includes(combo)) return;
+    l.push(combo);
+    setKeyList(l);
+  }
+  function delKeyChip(){
+    const l = keyList();
+    l.pop();
+    setKeyList(l);
+  }
+  function armKeyCapture(){
+    keyCapArmed = true;
+    const btn = $("capKeysBtn");
+    btn.classList.add("pulse");
+    btn.textContent = "请按键…";
+    $("keyCapHint").innerHTML = "正在等待：请按下要录入的键"
+      + "（可带 Ctrl / Alt / Shift）。按 Esc 取消。";
+  }
+  function disarmKeyCap(){
+    keyCapArmed = false;
+    const btn = $("capKeysBtn");
+    btn.classList.remove("pulse");
+    btn.textContent = "按一下录入";
+    $("keyCapHint").innerHTML = "点「按一下录入」再按你游戏里用的键，"
+      + "可录单个键也可加修饰键（如 Ctrl+W）。"
+      + "多个键会显示成一个个筹码，点 × 单独删。";
+  }
+  // 输入框里手打的文字也要同步出筹码，否则两处显示会打架
+  $("kKeys").addEventListener("input", renderKeyChips);
+
+  /* ---------- 参数持久化 ----------
+     【为什么必须存】连点参数（哪个键、多少 CPS、按多久）调一次很费劲，
+     关掉重开全丢回默认值 = 每次都要重调一遍。
+     存到 **exe 同目录**的 ui_settings.json：用户能直接找到、直接改，
+     也能拷到别的机器（触发键绑定跟着一起走）。
+     同目录写不进去（放在 Program Files、只读盘）时，后端会自动退回
+     %LOCALAPPDATA%\MouseAutoClicker\，界面无感。
+     ⚠ 后端算这个路径**不能用 __file__**：PyInstaller 单文件模式下
+     __file__ 指向 %TEMP%\_MEIxxxxx\，而该目录名每次启动都变，
+     写进去的文件下次启动根本不在 → 等于没存。
+     （2026-10-16 主人报的「绑好 G1/G2 重开又变回默认」就是这个坑。） */
+  function collectSettings(){
+    return {
+      mouse: { button: $("mBtn").value, action: $("mAct").value,
+               count: $("mCount").value, duration: $("mDur").value,
+               cps: $("mCps").value, jitter: $("mJitter").value,
+               mode: $("mMode").value, pos: $("mPos").value,
+               points: $("mPoints").value,     // v26：多点/框内坐标列表
+               countdown: $("mCd").value, hide: $("mHide").checked,
+               jig: $("mJig").value, done: $("mDone").value },
+      key:   { keys: $("kKeys").value, threshold: $("kThr").value,
+               hz: $("kHz").value, hold: $("kMode").value,
+               gap: $("kGap").value },
+      hide:  $("mHide").checked,
+      tray:  $("mTray").checked,   // v24 S1：关闭时缩到托盘
+    };
+  }
+  async function saveSettings(){
+    try{ await window.pywebview.api.save_settings(collectSettings()); }
+    catch(e){}
+  }
+  function applySettings(s){
+    if(!s || typeof s !== "object") return;
+    const m = s.mouse || {};
+    if(m.button != null) $("mBtn").value = m.button;
+    if(m.action)  $("mAct").value  = m.action;
+    if(m.count != null)   $("mCount").value = m.count;
+    if(m.duration != null) $("mDur").value  = m.duration;
+    if(m.cps != null)      $("mCps").value   = m.cps;
+    if(m.jitter != null)   $("mJitter").value = m.jitter;
+    if(m.mode)             $("mMode").value  = m.mode;
+    if(m.pos != null)      $("mPos").value   = m.pos;
+    if(m.points != null)   $("mPoints").value = m.points;   // v26 坐标列表
+    if(m.countdown != null) $("mCd").value   = m.countdown;
+    if(m.hide != null)     $("mHide").checked = !!m.hide;
+    if(m.jig != null)      $("mJig").value   = m.jig;
+    if(m.done)             $("mDone").value  = m.done;
+    if(s.tray != null)     $("mTray").checked = !!s.tray;   // v24 托盘开关
+    // v28：顶层 hide 是历史遗留的**副本**（真值在 mouse.hide）。
+    // 只有老方案文件里缺少 mouse.hide 时才用它兜底 —— 这样它不再是一个
+    // 只写不读的死键，旧文件也不会丢设置。
+    if(s.hide != null && m.hide == null) $("mHide").checked = !!s.hide;
+    syncMouseRows();          // 恢复后联动状态要对（固定坐标行显隐等）
+    const k = s.key || {};
+    if(k.keys != null)      $("kKeys").value = k.keys;
+    if(k.threshold != null) $("kThr").value  = k.threshold;
+    if(k.hz != null)        $("kHz").value   = k.hz;
+    if(k.hold)             $("kMode").value = k.hold;
+    if(k.gap != null)       $("kGap").value  = k.gap;
+  }
+
+  // 键盘区与鼠标区同一套两段式（见 startMouse 的注释）：
+  // 点「① 就绪」只装参数，按 F6 才真启动。
+  async function startKey(){
+    const r = await window.pywebview.api.arm_keyboard({
+      keys: $("kKeys").value, threshold: $("kThr").value,
+      hz: $("kHz").value, hold: $("kMode").value, gap: $("kGap").value
+    });
+    toast("kStatus", r.msg);
+    saveSettings();
+  }
+  async function stopKey(){
+    const r = await window.pywebview.api.stop_keyboard();
+    toast("kStatus", r.msg);
+  }
+
+  /* ---- 一键提权重启 ----
+     后端 relaunch_as_admin 用 ShellExecuteW(runas) 拉起一个管理员
+     权限的新实例（弹一次 UAC），新窗口建好后老实例自动退位。
+     UAC 被取消时后端返回 ok:false，这里恢复按钮并把原因显示出来。 */
+  async function relaunchAdmin(){
+    const btn = $("elevBtn");
+    if(!btn) return;
+    btn.disabled = true;
+    btn.textContent = "等待 UAC 确认…";
+    let r = null;
+    try{ r = await window.pywebview.api.relaunch_as_admin(); }
+    catch(e){ r = {ok:false, msg:"提权重启出错：" + e}; }
+    if(r && r.ok){
+      btn.textContent = "正在重启…";
+      $("gMsg").textContent = "正在以管理员身份重启本工具…";
+    }else{
+      btn.disabled = false;
+      btn.textContent = "以管理员身份重启";
+      $("gMsg").textContent = (r && r.msg) || "提权重启失败";
+    }
+  }
+
+  // 锁定行为切换时，只在「反复点击」下才需要显示按下时长
+  function syncGap(){
+    const pair = $("kMode").value === "false";
+    $("gapRow").style.display = pair ? "" : "none";
+    $("gapHint").textContent = pair
+      ? "「反复点击」每次会注入「按下→等待→抬起」。「按下时长」太短会被目标程序当成抖动忽略，建议 15~40 毫秒。"
+      : "「一直按着」只注入按下、不注入抬起，重复频率即按住状态的刷新频率。";
+  }
+  $("kMode").addEventListener("change", syncGap);
+
+  /* ---- 原始输入自检条 ----
+     「绑键没反应」时最难判断的是：到底程序压根没收到按键，
+     还是收到了但绑定那一步出错。前者要修链路，后者要修绑定逻辑，
+     两条路完全不同。所以这里把后端计数直接摆出来：
+     按一下鼠标键，消息数 +1 就说明链路是通的。 */
+  async function refreshRawDiag(){
+    let d;
+    try{ d = await window.pywebview.api.raw_diag(); }catch(e){ return; }
+    if(!d) return;
+    const modeEl = $("rdMode");
+    if(d.mode === "raw"){
+      modeEl.textContent = "原始输入（正常）";
+      modeEl.className = "ok";
+    }else if(d.mode === "poll"){
+      modeEl.textContent = "降级轮询";
+      modeEl.className = "bad";
+    }else{
+      modeEl.textContent = "未就绪";
+      modeEl.className = "bad";
+    }
+    $("rdMsg").textContent = d.messages || 0;
+    const ids = d.last_ids || [];
+    const NAMES = {0:"左键",1:"右键",2:"中键",3:"G1",4:"G2",
+                   5:"G3",6:"G4",7:"G5",8:"G6",9:"G7",10:"G8",
+                   11:"G9",12:"G10",13:"G11",14:"G12",15:"G13"};
+    const lp = d.last_press || null;
+    if(ids.length){
+      // 正按着：直接报按住的键
+      $("rdLast").textContent = ids.map(i => NAMES[i] || ("#" + i)).join("+");
+      $("rdLast").className = "rd-hot";
+    }else if(lp && lp.age <= 10){
+      // 已经松开：显示「刚刚按过什么」。
+      // 这是本条的修复点——旧版抬起就把 last_ids 清空，500ms 轮询
+      // 采样不到一次 80ms 的点击，看起来像「只偶尔认一次左键」。
+      $("rdLast").textContent = (lp.name || ("#" + lp.id))
+        + "（" + Number(lp.age).toFixed(1) + " 秒前）";
+      $("rdLast").className = "rd-hot";
+    }else{
+      $("rdLast").textContent = "—";
+      $("rdLast").className = "";
+    }
+    $("rdHint").textContent = d.hint || "";
+  }
+
+  // 轮询状态
+  let lastMouseRun = null, lastKeyRun = null;
+  // 就绪态（两段式的「参数已装填」）也要做翻转检测，
+  // 否则每 500ms 重复 toggle 会白刷样式
+  let lastMouseArmed = null, lastKeyArmed = null;
+  // 必须在 poll 之前声明：poll 里会读它。
+  // （声明写在后面会撞 let 的暂时性死区，poll 首次执行就 ReferenceError，
+  //  而它整个包在 try 里，结果是「状态永远不刷新」——很难联想到是这一行）
+  let lastMaxCheck = 0;
+  async function poll(){
+    try{
+      const s = await window.pywebview.api.status();
+      // 状态文字：运行中用高亮色，就绪用弱化色，
+      // 否则四个 KPI 里两个写着「就绪」却最显眼，视觉重心全错。
+      // data-v 是给 .n::after 用的（画在下层的辉光副本），
+      // 必须跟着 textContent 一起更新，否则辉光会显示旧值。
+      // 【两段式·2026-10-15】新增「已就绪」态：参数装好了、等触发键，
+      // 用 .n.armed 青色，和运行的薄荷绿、闲置的灰区分开——
+      // 旧版「就绪」和「已启动」看起来没区别，是状态机 bug 的帮凶。
+      // 【分区暂停·2026-10-16】触发键现在切的是「暂停/继续」而不是「停止」，
+      // 所以 KPI 必须能显示「已暂停」——否则界面写着「left 连点」、
+      // 游戏里却一动不动，看着像坏了。
+      const mt = s.mouse_running ? (s.mouse_paused ? "已暂停" : s.mouse_info)
+                : (s.mouse_armed ? "已就绪" : "就绪");
+      const kt = s.key_running ? (s.key_paused ? "已暂停" : s.key_info)
+                : (s.key_armed ? "已就绪" : "就绪");
+      $("kMouse").textContent = mt;
+      $("kMouse").dataset.v = mt;
+      $("kMouse").className = "n" + (s.mouse_running ? (s.mouse_paused ? " pause" : " on")
+                                  : (s.mouse_armed ? " armed" : " idle"));
+      $("kKey").textContent = kt;
+      $("kKey").dataset.v = kt;
+      $("kKey").className = "n" + (s.key_running ? (s.key_paused ? " pause" : " on")
+                                  : (s.key_armed ? " armed" : " idle"));
+      $("kClick").textContent = s.click;
+      $("kClick").dataset.v = s.click;
+      $("kTime").textContent = s.elapsed + "s";
+      $("kTime").dataset.v = s.elapsed + "s";
+      // ---- 分区状态：每个区只显示自己的消息 ----
+      // 【为什么改】以前两区都渲染全局 s.message，
+      // 「鼠标暂停了」也会显示在键盘区（主人反馈：
+      // 「几个区的显示状态是全局的而不是单独的」）。
+      // 后端已按 mouse/key 分区写 mouse_msg / key_msg，这里分开渲染。
+      if(s.mouse_running){
+        $("mStatus").innerHTML = (s.mouse_paused ? "已暂停 · " : "运行中：")
+                               + (s.mouse_msg || s.mouse_info);
+        $("mStatus").className = "status live" + (s.mouse_paused ? " paused" : "");
+      }else if(s.mouse_armed){
+        // 就绪态：后端 mouse_msg 此时是「已就绪：按 F5 开始连点…」
+        $("mStatus").innerHTML = s.mouse_msg || "已就绪：按触发键开始连点";
+        $("mStatus").className = "status armed";
+      }else{
+        $("mStatus").innerHTML = s.mouse_msg || "鼠标区未启动。";
+        $("mStatus").className = "status";
+      }
+      // v23 S4：收尾动作（完成后动作）倒计时中才显示「取消」按钮。
+      // pending 在关机指令已发后仍为 true——系统层还有 60 秒窗口，
+      // 这时候取消照样能救回来（后端会发 shutdown /a）。
+      const dcr = $("doneCancelRow");
+      if(dcr){
+        const dp = s.done_pending || {};
+        dcr.style.display = dp.pending ? "" : "none";
+      }
+      if(s.key_running){
+        $("kStatus").innerHTML = (s.key_paused ? "已暂停 · " : "运行中：")
+                                + (s.key_msg || s.key_info);
+        $("kStatus").className = "status live" + (s.key_paused ? " paused" : "");
+      }else if(s.key_armed){
+        $("kStatus").innerHTML = s.key_msg || "已就绪：按触发键启动锁定";
+        $("kStatus").className = "status armed";
+      }else{
+        $("kStatus").innerHTML = s.key_msg || "键盘区未启动。";
+        $("kStatus").className = "status";
+      }
+      // 全局消息单独一行（顶栏下面），不再和各区状态混在一起
+      $("gMsg").textContent = s.message || "";
+      // 暂停按钮文字跟着状态走：热键/别处改了状态，按钮也要变
+      $("pauseBtn").textContent = s.paused ? "恢复运行" : "暂停";
+      $("pauseBtn").classList.toggle("paused", !!s.paused);
+      const busy = s.mouse_running || s.key_running;
+      $("badge").textContent = s.paused ? "PAUSED"
+                             : (busy ? "RUNNING" : "SYS READY");
+      $("badge").className = "tag" + (busy ? " run" : "")
+                            + (s.paused ? " pause" : "");
+      // 卡片激活态：只在状态翻转时改 class，避免每 500ms 重复触发
+      // breathe 动画的样式重算（clip-path 重绘在 WebView2 上不便宜）
+      if(s.mouse_running !== lastMouseRun){
+        lastMouseRun = s.mouse_running;
+        $("cardMouse").classList.toggle("on", !!s.mouse_running);
+      }
+      // 就绪态给卡片描个边（比运行的辉光弱，但一眼能看出「装好了」）
+      if(s.mouse_armed !== lastMouseArmed){
+        lastMouseArmed = s.mouse_armed;
+        $("cardMouse").classList.toggle("armed",
+                                        !!s.mouse_armed && !s.mouse_running);
+      }
+      if(s.key_running !== lastKeyRun){
+        lastKeyRun = s.key_running;
+        $("cardKey").classList.toggle("on", !!s.key_running);
+      }
+      if(s.key_armed !== lastKeyArmed){
+        lastKeyArmed = s.key_armed;
+        $("cardKey").classList.toggle("armed",
+                                      !!s.key_armed && !s.key_running);
+      }
+      // 提权警告横幅：后端看门狗发现「前台是提权窗口而本进程普通权限」
+      // （注入会被 UIPI 静默拦截）时置 elev_warn，这里显示横幅 +
+      // 「以管理员身份重启」按钮（relaunchAdmin -> relaunch_as_admin）
+      const eb = $("elevBan");
+      if(eb) eb.classList.toggle("show", !!s.elev_warn);
+    }catch(e){}
+    // 捕获轮询放在 try 外面：捕获逻辑本身有 try，
+    // 但万一它抛异常，不能连带把状态刷新一起中断
+    try{ await pollTriggerCapture(); }catch(e){}
+    // 最大化状态跟着主轮询走（每 700ms 一次，别太频繁）。
+    // 【为什么要单独轮询而不是只听 resize】
+    // 后端是 SetWindowPos 改矩形实现的最大化，不保证触发 WebView2 的
+    // resize 事件；只听事件的话「最大化」按钮的图标不会变成还原图标，
+    // 表现为「窗口已经是最大化的了，但按钮还显示最大化，再点没反应」。
+    if(Date.now() - lastMaxCheck > 700){
+      lastMaxCheck = Date.now();
+      try{ await syncMaxIcon(); }catch(e){}
+      // 自检条不用每 500ms 刷，跟着最大化一起 700ms 刷一次就够看了
+      try{ await refreshRawDiag(); }catch(e){}
+    }
+  }
+
+  window.addEventListener("pywebviewready", async () => {
+    const bs = await window.pywebview.api.bootstrap();
+    await initButtons(bs.buttons);
+    // 先恢复上次的参数，再渲染按键筹码 ——
+    // 顺序反了的话筹码会按默认值(w)渲染，之后又被输入框的值覆盖，
+    // 界面上就会出现「输入框是 ctrl+w、筹码却只有 W」的不一致
+    applySettings(bs.settings);
+    renderKeyChips();
+    // 暂停热键：Pause 优先，被占用会降级（后端已试过一串候选）
+    $("hkPause").textContent = prettyPauseKey(bs.pause_key);
+    // 热键显示统一交给 refreshHotkeys：它会同时显示
+    // 「系统热键」和「鼠标键」两类，鼠标键优先（它不会被占用）
+    await refreshHotkeys();
+    syncMaxIcon();
+    syncGap();
+    // 数字输入框滚轮防护：
+    // 滚轮滑过 CPS/次数/秒数输入框时，WebView 会把它当成「改值」，
+    // 表现为「启动鼠标区后滚轮输入有点奇怪」的一半原因
+    // （另一半是原始输入里的滚轮事件，后端已显式接住）。
+    // 这里让滚轮焦点上的数字框直接失焦，值不动、页面正常滚。
+    document.addEventListener("wheel", (e)=>{
+      const t = e.target;
+      if(t && t.tagName === "INPUT" && t.type === "number"){
+        e.preventDefault();
+        t.blur();
+      }
+    }, {passive:false});
+    setInterval(poll, 500);
+    poll();
+    // 宏录制区（v27）：先拉一次已保存的宏，再起状态轮询。
+    // 录制中窗口是最小化的，WebView 会节流 setTimeout，
+    // 但用户一按 Pause 后端就把窗口叫回来，恢复后第一轮 poll 立刻追上。
+    macRefreshList();
+    macPoll();
+    setInterval(macPoll, 700);
+  });
+
+  // 窗口关闭前再存一次（兜底）。
+  window.addEventListener("beforeunload", ()=>{ saveSettings(); });
+
+  /* 改动即存（去抖 400ms）。
+     【为什么不能只靠 beforeunload】pywebview 关窗口的路子不止一条
+     （自绘标题栏的关闭按钮、任务栏右键菜单、系统强制关闭），
+     beforeunload 不一定每次都跑得到；用户改完 CPS 直接点 X
+     就等于白改。所以改成「任何输入一变就排队写盘」，
+     关窗前那次只是双保险。去抖是为了不把磁盘写得太吵。 */
+  (function(){
+    const ids = ["mBtn","mAct","mCount","mDur","mCps","mJitter",
+                 "mMode","mPos","mPoints","mCd","mHide","mJig","mDone","mTray",
+                 "kKeys","kThr","kHz","kMode","kGap"];
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(saveSettings, 400); };
+    ids.forEach(id => {
+      const el = $(id);
+      if(!el) return;
+      el.addEventListener("input", soon);
+      el.addEventListener("change", soon);
+    });
+    // 动作/位置模式变化时刷新联动显隐（v22）
+    $("mAct").addEventListener("change", syncMouseRows);
+    $("mMode").addEventListener("change", syncMouseRows);
+    // 首屏也要刷一次：恢复设置前默认值就得是对的
+    syncMouseRows();
+  })();
+  // ---- 配置导入 / 导出 / 剪贴板 / 多方案 ----
+  /* 【为什么用 class 而不是 style.display】v19 的写法是把内联 display
+     读出来和 block 比：CSS 没给默认值时内联是空串，第一次点会被判成
+     「当前没开」→ 设成 block（其实早就开着）→ 要点两次才隐藏。
+     ⚠ 注释里**不要**写出与旧代码逐字相同的串（例如三个等号的判法）——
+     静态断言会把解释文字当成残留 bug（这个坑本项目已踩三次）。
+     改用 classList + CSS 的 .open，显示状态只有一个来源。 */
+  function toggleCfg(){
+    const p = $("cfgPanel"); if(!p) return;
+    p.classList.toggle("open");
+    if(p.classList.contains("open")) refreshProfiles();
+  }
+  function cfgMsg(msg, err){
+    const el = $("cfgMsg"); if(!el) return;
+    el.textContent = msg || "";
+    el.className = "cfg-msg" + (err ? " err" : "");
+  }
+  async function exportFile(){
+    try{
+      const r = await window.pywebview.api.export_config_file();
+      if(r && r.ok){ cfgMsg("已导出：" + r.path); }
+      else{ cfgMsg((r && r.msg) || "导出失败", true); }
+    }catch(e){ cfgMsg("导出出错：" + e, true); }
+  }
+  async function copyClip(){
+    try{
+      const r = await window.pywebview.api.copy_config_clipboard();
+      if(r && r.ok){ cfgMsg(r.msg || "已复制到剪贴板"); }
+      else{ cfgMsg((r && r.msg) || "复制失败", true); }
+    }catch(e){ cfgMsg("复制出错：" + e, true); }
+  }
+  async function importFile(input){
+    const f = input.files && input.files[0];
+    if(!f) return;
+    try{ const text = await f.text(); await doImportText(text); }
+    catch(e){ cfgMsg("读文件失败：" + e, true); }
+    input.value = "";
+  }
+  async function pasteClip(){
+    try{
+      const r = await window.pywebview.api.paste_config_clipboard();
+      if(r && r.ok){ applySettingsFromImport(r.msg); }
+      else{ cfgMsg((r && r.msg) || "粘贴失败", true); }
+    }catch(e){ cfgMsg("粘贴出错：" + e, true); }
+  }
+  async function doImportText(text){
+    try{
+      const r = await window.pywebview.api.import_config_text(text);
+      if(r && r.ok){ applySettingsFromImport(r.msg); }
+      else{ cfgMsg((r && r.msg) || "导入失败", true); }
+    }catch(e){ cfgMsg("导入出错：" + e, true); }
+  }
+  // 导入/加载成功后：重新拉全量 settings 回填表单（trigger 不在导入范围，保持本机绑定）
+  function applySettingsFromImport(msg){
+    try{ window.pywebview.api.load_settings().then(s => applySettings(s)); }catch(e){}
+    cfgMsg(msg || "已导入配置");
+  }
+  async function refreshProfiles(){
+    try{
+      const r = await window.pywebview.api.list_profiles();
+      const sel = $("cfgProfileSel"); if(!sel) return;
+      sel.innerHTML = '<option value="">— 选择方案 —</option>';
+      if(r && r.ok && r.profiles){
+        for(const name of r.profiles){
+          const o = document.createElement("option");
+          o.value = name; o.textContent = name; sel.appendChild(o);
+        }
+      }
+    }catch(e){}
+  }
+  async function saveProfile(){
+    const inp = $("cfgProfileName"); const name = inp && inp.value;
+    if(!name || !name.trim()){ cfgMsg("请先输入方案名", true); return; }
+    try{
+      const r = await window.pywebview.api.save_profile(name.trim());
+      if(r && r.ok){ cfgMsg(r.msg); refreshProfiles(); if(inp) inp.value = ""; }
+      else{ cfgMsg((r && r.msg) || "保存失败", true); }
+    }catch(e){ cfgMsg("保存出错：" + e, true); }
+  }
+  async function loadProfile(){
+    const sel = $("cfgProfileSel"); const name = sel && sel.value;
+    if(!name){ cfgMsg("请先选择一个方案", true); return; }
+    try{
+      const r = await window.pywebview.api.load_profile(name);
+      if(r && r.ok){ applySettingsFromImport(r.msg); }
+      else{ cfgMsg((r && r.msg) || "加载失败", true); }
+    }catch(e){ cfgMsg("加载出错：" + e, true); }
+  }
+  async function delProfile(){
+    const sel = $("cfgProfileSel"); const name = sel && sel.value;
+    if(!name){ cfgMsg("请先选择一个方案", true); return; }
+    try{
+      const r = await window.pywebview.api.delete_profile(name);
+      if(r && r.ok){ cfgMsg(r.msg); refreshProfiles(); }
+      else{ cfgMsg((r && r.msg) || "删除失败", true); }
+    }catch(e){ cfgMsg("删除出错：" + e, true); }
+  }
+</script>
+</body>
+</html>

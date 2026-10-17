@@ -1,0 +1,31 @@
+{
+  "cps": 10,
+  "button": "left",
+  "click_type": "single",
+  "mode": "fixed",
+  "fixed_pos": [
+    300,
+    300
+  ],
+  "random_jitter": 0,
+  "duration": 1,
+  "count_limit": 0,
+  "hotkey_start": "F8",
+  "run_at_start": false,
+  "stay_on_top": true,
+  "click_sound": false,
+  "plugin_state": {
+    "drag_loop": {
+      "points": "100,100 -> 400,300",
+      "steps": 20,
+      "step_delay": 10,
+      "pause": 300
+    },
+    "macro": {
+      "steps": "click;wait@300;click",
+      "loop": true,
+      "round_pause": 500
+    }
+  },
+  "done_action": "none"
+}

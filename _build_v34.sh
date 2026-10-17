@@ -1,0 +1,137 @@
+#!/bin/bash
+# =====================================================================
+# _build_v34.sh —— v34 全量打包（7 个 exe，图形版 爪Pro.exe）
+# =====================================================================
+# 复刻 build.bat 的 7 个 PyInstaller 目标。三条铁律来自本机实测教训：
+#   1. **绝不删除任何旧目录** —— 本机有批量删除保护，PyInstaller 重建时
+#      删不掉旧产物，表现为「日志显示 Build complete 但 exe 还是上一轮的」。
+#   2. **不加 --clean** —— 它会先整目录删 build\，本机可能被拦导致打包失败。
+#   3. **workpath 按轮独立** —— 复用旧 workpath 时「源码没变的目标」
+#      会被判 up-to-date 直接跳过重写，产物是上一轮的，时间戳校验误报。
+#
+# v34 内容（主人 2026-10-18 凌晨实测报回的两条）：
+#   ① **回放跑到左上角去点**（大 bug）：
+#      core/inputs.py 里 5 处构造点写成 `MOUSEINPUT(x=..., y=...)`，
+#      而真字段名是 dx / dy。ctypes 的 Structure 对**不存在的字段关键字
+#      不报错** —— 构造「成功」、SendInput 照样返回成功，坐标却永远是 0，
+#      于是每一步都把鼠标送到 (0,0)。点击类事件不带坐标看不出来，
+#      只有移动类事件暴露，所以它能一路活到用户手上（v25 加虚屏坐标时
+#      就写错了，期间副屏、宏回放全都受影响）。
+#      修成 dx=/dy=，并在 docstring 里留反例警示。
+#   ② 宏区启停键（F7）：
+#      · 回放一启动窗口就最小化，没有系统级热键就没法中途暂停；
+#      · 新增 HOTKEY_MACRO_FALLBACK（F7 / Ctrl+F7 / F10）+ toggle_macro；
+#      · 暂停控制加 "macro" 分区（以前宏跟着 mouse 区走，
+#        一按启停键会连带把连点定住）；引擎 ClickContext/ ClickerEngine
+#        新增 zone 参数，默认 "mouse" 老行为一字不变；
+#      · 状态分派：录制中→收尾 / 回放中→暂停 / 暂停中→继续 /
+#        空闲有步骤→启动 / 空闲没步骤→明确提示「先录制」；
+#      · 界面：触发方式区第 4 格 + 宏区提示行（都显示**真键名**，
+#        降级到 Ctrl+F7 时不会照提示按错）；改键/绑鼠标键下拉加 macro。
+#   防线：diag_v34_probe.py 26 项。关键一手是**假 SendInput 抄字节**——
+#      本会话进程注入不生效（move_to 返回 True 但光标不动），
+#      真机验不了；但「我们送出去的 dx/dy 对不对」可以验，
+#      比看光标有没有动更硬，且不依赖系统权限。
+#   ③ **界面 UI 重设计：青→紫（紫霓虹·实心分层，A 方向）**：
+#      名字/图标已是「爪Pro·紫爪」，界面还是青色全息风，皮与身份脱节。
+#      做法 = 皮骨分离：骨（宽屏加列规则/切角/等宽数字/三态色/双源同步）
+#      全留，皮（强调色/底色/辉光）围绕图标紫重做。token：
+#      底 #06030D / 面板 #120A24 / 强调 #8B5CF6（图标渐变 #DEB0FF→#7A24D2
+#      中值）/ 深 #5B1E9E / 亮 #A78BFA / 文字 #F0E8FF·#9C8CC4·#5F4E85；
+#      语义色不变（薄荷=运行/琥珀=暂停/红=警报）。
+#      core/toast.py 同源改（跨源绑定 verify_toast_style.py 56 项断言）。
+#      防线：toast_style 56 + two_stage 340（含双源一致闸门）
+#      + MKSHOT 1180/1500/1920/2560 四档视觉验收。
+#
+# v31（保留在 dist_v31）：界面精简 + 按钮统一 + 改名 爪Pro + 窗口可拖缩。
+# v30（保留在 dist_v30）：诊断锁存 + 三栏页脚 + 录制起点/步骤编辑器。
+# v29（保留在 dist_v29）：触发键捕获 8 秒超时 + 左键误录文案 + 最近按键补写。
+# v28（保留在 dist_v28）：录制期按 Pause 会顺带打开全局暂停 → 回放卡在第一步。
+# v27（保留在 dist_v27）：S2 宏录制回放 GUI（键鼠双低层钩 + 回放插件 + 独立分区）。
+# v25：副屏/虚拟桌面坐标（**本版修的 bug 就是从这里写错的**）。
+# v24：系统托盘（S1）/ v23：S4+S5+S6 / v22：鼠标区四大进阶参数接线。
+#
+# 回归基线（.venv **串行**全绿）：
+#   verify_window 214 / mouse_zone 39 / binding 49 / trigger 48 /
+#   bugfix 29 / two_stage 340 / config_io 32 / toast_delivery 13 /
+#   toast_style 56 / toast 冒烟 / reported 65 / keypause 21 / settings 32 /
+#   globalpause 18 / regression_keyhold 66 / v22 probe 72 / v23 probe 130 /
+#   v24 probe 66 / v25 probe 26 / v26 probe 89 / v27 probe 182+1SKIP /
+#   v30 probe 77 / **v34 probe 26（本版新增）** / selftest 21（vsum）
+# ⚠ 回归必须**串行**跑：有计时敏感断言，并行会互相抢 CPU 造成偶发假红。
+#
+# 运行：bash _build_v34.sh   （约 3-5 分钟）
+# =====================================================================
+# =====================================================================
+set -e
+cd "$(dirname "$0")"
+
+PY="C:/Users/LXZ/.workbuddy/binaries/python/envs/vsum/Scripts/python.exe"
+DIST="dist_v34"
+STAMP=$(date +%s)
+WP="build/r$(date +%m%d%H%M%S)"
+
+echo "[0/4] 依赖硬校验（缺 pywebview 直接中止，不静默产出打不开的 exe）"
+"$PY" -c "import webview" || { echo "[错误] 缺少 pywebview"; exit 1; }
+echo "  pywebview OK"
+
+echo "[1/4] 开始打包 7 个目标 -> $DIST （不删旧目录、不加 --clean、workpath 按轮独立）"
+"$PY" -m PyInstaller spec_dashboard.spec    --noconfirm --workpath "$WP/dash"    --distpath "$DIST"
+"$PY" -m PyInstaller spec_keyhold_gui.spec  --noconfirm --workpath "$WP/gui"     --distpath "$DIST"
+"$PY" -m PyInstaller spec_keyhold.spec      --noconfirm --workpath "$WP/keyhold" --distpath "$DIST"
+"$PY" -m PyInstaller spec_cli.spec          --noconfirm --workpath "$WP/cli"     --distpath "$DIST"
+"$PY" -m PyInstaller spec_diagwin.spec      --noconfirm --workpath "$WP/dw"      --distpath "$DIST"
+"$PY" -m PyInstaller spec_diagtarget.spec   --noconfirm --workpath "$WP/dt"      --distpath "$DIST"
+"$PY" -m PyInstaller spec_diag.spec         --noconfirm --workpath "$WP/di"      --distpath "$DIST"
+
+echo "[2/4] 附带说明文档"
+cp -f "交付/使用说明.md" "$DIST/"
+
+echo "[3/4] 校验 7 个产物都是本轮新生成（时间戳 >= 本轮开始）"
+FAIL=0
+EXPECT="爪Pro.exe 长按锁定器-图形版.exe 鼠标连点器-长按锁定.exe 鼠标连点器.exe 注入窗口测试.exe 注入目标诊断.exe 注入诊断工具.exe"
+for name in $EXPECT; do
+  f="$DIST/$name"
+  if [ ! -f "$f" ]; then
+    echo "  [失败] 未生成: $name"; FAIL=1; continue
+  fi
+  MT=$(stat -c %Y "$f")
+  if [ "$MT" -lt "$STAMP" ]; then
+    echo "  [失败] $name 时间戳旧于本轮开始 —— 旧文件，新代码没打进去"; FAIL=1
+  else
+    echo "  [OK] $name  $(stat -c %y "$f" | cut -d. -f1)  $(stat -c %s "$f") 字节"
+  fi
+done
+
+# 端到端校验：exe 里内嵌的 HTML 必须和 ui/dashboard.html 逐字节一致。
+# 【为什么加这道】2026-10-16 v12 双源断裂事故：UI 改动只写了
+# ui/dashboard.html 没回嵌 dashboard.py，上面 7 项全 OK、回归全绿、
+# 截图正常，exe 里却是旧界面。时间戳只能证明「这轮打的」，
+# 证明不了「打进去的是新代码」——所以直接把 exe 刨开比 md5。
+if [ "$FAIL" = "0" ]; then
+  echo "[3.5/4] 端到端校验 exe 内嵌 HTML == ui/dashboard.html"
+  if "$PY" _verify_exe_html.py "$DIST/爪Pro.exe"; then
+    echo "  [OK] exe 内嵌 HTML 与源码一致"
+  else
+    echo "  [失败] exe 内嵌 HTML 与源码不一致（漏回嵌 dashboard.py？）"; FAIL=1
+  fi
+fi
+
+# 模块完整性：动态 import 的模块会被 PyInstaller 静默漏掉
+# （源码能跑、日志全绿、exe 里就是没有）。CArchive + PYZ 两层都查。
+if [ "$FAIL" = "0" ]; then
+  echo "[3.6/4] 校验 exe 内项目模块齐全（CArchive + PYZ）"
+  if "$PY" _verify_exe_modules.py "$DIST/爪Pro.exe"; then
+    echo "  [OK] 项目模块无缺失"
+  else
+    echo "  [失败] exe 内缺项目模块（新增模块没进包？）"; FAIL=1
+  fi
+fi
+
+echo "[4/4] 结果"
+if [ "$FAIL" = "0" ]; then
+  echo "BUILD_OK：7 个 exe 全部为本轮新生成，产物在 $DIST/"
+else
+  echo "BUILD_FAILED：有产物校验失败（见上），换一个从未用过的版本目录重打"
+  exit 1
+fi

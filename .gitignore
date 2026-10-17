@@ -1,0 +1,31 @@
+# Python / 虚拟环境
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# PyInstaller 产物（历史版本只保留在磁盘，不进 Git）
+build/
+build_v*/
+dist/
+dist_v*/
+_old/
+*.exe
+
+# 运行时用户数据
+**/ui_settings.json
+profiles/
+macros/
+*.bak
+*.bak-*
+_test_*.json
+
+# 临时检查与构建日志
+_shots/
+*.log
+*.tmp
+_reg_*.txt
+_reg_*out*.txt
+
+# 交付目录中的源码镜像；Git 只跟踪项目根的唯一源码
+交付/source/
