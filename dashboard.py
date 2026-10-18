@@ -4383,6 +4383,26 @@ HTML = r"""<!DOCTYPE html>
       --glow-soft:rgba(139,92,246,.18);
       /* ---- 形状：科技风靠切角而不是圆角 ---- */
       --chamfer:12px;
+      /* ---- 玻璃宝石层（v36：glassmorphism 四层配方）----
+         一层 = 背后可糊的内容（body::before 极光光斑，玻璃在纯色背景上不可见）
+         二层 = 半透明紫味填充 + backdrop-filter blur+saturate
+         三层 = 1px 半透明边缘 + inset 顶部高光 / 底部暗边（宝石的棱）
+         四层 = 多层外阴影制造悬浮感
+         【性能铁律】backdrop-filter 是 CSS 里最贵的属性之一：
+         同屏玻璃面板 ≤6 个（现为 hero/鼠标/键盘/触发/宏 5 个 + 配置面板），
+         **卡片内部一律不再叠 backdrop-filter**（嵌套模糊是平方开销），
+         也不动画 blur 半径（每帧重糊整个背景），只动 transform/阴影/填充。 */
+      --glass-fill:rgba(139,92,246,.11);
+      --glass-fill-mid:rgba(18,10,36,.58);
+      --glass-fill-low:rgba(24,14,48,.42);
+      --glass-blur:18px;
+      --glass-sat:160%;
+      --glass-edge:rgba(167,139,250,.30);
+      --glass-edge-lit:rgba(240,232,255,.42);
+      --glass-hi:rgba(240,232,255,.13);
+      --glass-shadow:0 18px 44px rgba(2,0,10,.55),0 0 30px rgba(139,92,246,.10);
+      --gem-hi:rgba(255,255,255,.40);
+      --gem-low:rgba(20,4,48,.55);
       --t-fast:.18s;
       --ease:cubic-bezier(.4,0,.2,1);
     }
@@ -4397,6 +4417,32 @@ HTML = r"""<!DOCTYPE html>
       /* 顶部留出标题栏的高度，否则内容会被压在标题栏下面 */
       padding:52px 24px 28px;
       overflow-x:hidden;
+    }
+
+    /* ---------- 玻璃的第一层：背后必须有可糊的内容 ----------
+       【v36 为什么加这一层】backdrop-filter 只糊「元素背后已绘制的内容」。
+       纯色 #06030D 上糊什么都没变化 —— 玻璃看着像一块半透明的脏塑料。
+       所以先用三团紫/蓝极光光斑把背景「填满内容」，玻璃才有东西可折射。
+       光斑走 26s 极慢往复漂移（远慢于任何阅读节奏，不分散注意力），
+       @media prefers-reduced-motion 里已有全局 animation:none 兜底。 */
+    body::before{
+      content:"";position:fixed;inset:-8%;z-index:-1;pointer-events:none;
+      background:
+        radial-gradient(640px 440px at 16% 10%, rgba(139,92,246,.30), transparent 62%),
+        radial-gradient(560px 400px at 84% 20%, rgba(167,139,250,.19), transparent 60%),
+        radial-gradient(760px 520px at 52% 112%, rgba(91,30,158,.26), transparent 60%);
+      animation:aurora 26s var(--ease) infinite alternate;
+    }
+    /* 第二层细节：极淡噪点。重模糊下渐变色带（banding）会出现阶梯状条纹，
+       一层 opacity .05 的 feTurbulence 噪点即可打散，同时增加「材质感」。 */
+    body::after{
+      content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+    }
+    @keyframes aurora{
+      0%{transform:translate3d(0,0,0) scale(1)}
+      50%{transform:translate3d(1.6%,-1.2%,0) scale(1.05)}
+      100%{transform:translate3d(-1.4%,1.4%,0) scale(1.02)}
     }
 
     /* ---------- 滚动条：跟全息风统一 ----------
@@ -4462,10 +4508,13 @@ HTML = r"""<!DOCTYPE html>
     .titlebar{
       position:fixed;top:0;left:0;right:0;height:34px;z-index:30;
       display:flex;align-items:center;
-      background:linear-gradient(180deg,#150C28 0%,#0E0718 100%);
-      border-bottom:1px solid var(--line);
+      /* 玻璃标题栏：半透明 + 糊住背后的极光，和面板同一套材质语言 */
+      background:linear-gradient(180deg,rgba(38,22,72,.62) 0%,rgba(14,7,24,.58) 100%);
+      -webkit-backdrop-filter:blur(20px) saturate(var(--glass-sat));
+      backdrop-filter:blur(20px) saturate(var(--glass-sat));
+      border-bottom:1px solid var(--glass-edge);
       /* 上边一条高光线，是全息面板的标志性细节 */
-      box-shadow:0 1px 0 rgba(139,92,246,.14), 0 4px 14px rgba(0,0,0,.5);
+      box-shadow:inset 0 1px 0 rgba(240,232,255,.14), 0 4px 14px rgba(0,0,0,.5);
       user-select:none;-webkit-user-select:none;
     }
     .titlebar .tb-left{display:flex;align-items:center;gap:9px;padding-left:14px;min-width:0}
@@ -4517,12 +4566,13 @@ HTML = r"""<!DOCTYPE html>
       margin:14px 0 4px;
     }
     .trig-cell{
-      border:1px solid var(--line-soft);
+      border:1px solid rgba(139,92,246,.18);
       border-left:2px solid var(--accent);
-      background:linear-gradient(180deg,rgba(139,92,246,.06),rgba(18,10,36,.4));
+      background:linear-gradient(180deg,rgba(139,92,246,.09),rgba(14,7,28,.46));
       padding:11px 14px;
       clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),
                         calc(100% - 7px) 100%,0 100%);
+      box-shadow:inset 0 1px 0 rgba(240,232,255,.08);
     }
     .trig-cell .tc-title{
       font-size:10px;letter-spacing:.18em;text-transform:uppercase;
@@ -4809,22 +4859,39 @@ HTML = r"""<!DOCTYPE html>
       .wrap>.macro .macro-grid{grid-template-columns:1fr}
     }
 
-    /* ---------- 面板通用（切角 + 发光描边） ---------- */
+    /* ---------- 面板通用（v36 玻璃宝石配方）----------
+       四层里这里占三层：半透明紫味填充 + backdrop-filter（背后极光被糊住）
+       + 1px 边缘 + inset 顶部高光/底部暗边（玻璃的棱）+ 多层外阴影（悬浮）。
+       clip-path 切角保留（与 toast 同构形状语言，且 verify_toast_style 断言它）。
+       注意 inset 高光会被切角裁掉两角——这是刻意的，切角语言优先。 */
     .panel{
       position:relative;
-      background:linear-gradient(160deg, rgba(139,92,246,.10) 0%,
-                 rgba(18,10,36,.72) 42%, rgba(24,14,48,.55) 100%);
-      border:1px solid var(--line);
+      background:linear-gradient(160deg, var(--glass-fill) 0%,
+                 var(--glass-fill-mid) 46%, var(--glass-fill-low) 100%);
+      -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));
+      backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));
+      border:1px solid var(--glass-edge);
       clip-path:polygon(var(--chamfer) 0,100% 0,
                         100% calc(100% - var(--chamfer)),
                         calc(100% - var(--chamfer)) 100%,0 100%,0 var(--chamfer));
-      box-shadow:0 0 24px var(--glow-soft), inset 0 0 32px rgba(139,92,246,.06);
+      box-shadow:var(--glass-shadow),
+                 inset 0 1px 0 var(--glass-hi),
+                 inset 0 -1px 0 rgba(0,0,0,.34),
+                 inset 0 0 34px rgba(139,92,246,.05);
       padding:16px 24px;
     }
-    /* 顶部全息高光描边 */
+    /* 顶部全息高光描边：玻璃受光面，比原来更亮一档 */
     .panel::before{
       content:"";position:absolute;left:var(--chamfer);right:0;top:0;height:1px;
-      background:linear-gradient(90deg,transparent,var(--glow) 30%,var(--glow) 70%,transparent);
+      background:linear-gradient(90deg,transparent,var(--glass-edge-lit) 30%,
+                                 var(--glass-edge-lit) 70%,transparent);
+    }
+    /* 玻璃降级：不支持 backdrop-filter 的引擎（老 WebView2 / 软件渲染），
+       把填充提成接近实色，保证可读性——玻璃是装饰，内容永远优先。 */
+    @supports not (backdrop-filter:blur(2px)){
+      .panel{background:linear-gradient(160deg, rgba(139,92,246,.16) 0%,
+                    #150C2A 46%, #1B1036 100%)}
+      .panel::before{display:none}
     }
     /* ---------- 四角 HUD 角标 ---------- */
     .hud{position:relative}
@@ -4859,7 +4926,8 @@ HTML = r"""<!DOCTYPE html>
     letter-spacing:.14em;text-transform:uppercase;
     color:var(--accent-mint);
     border:1px solid rgba(62,240,196,.38);
-    background:rgba(62,240,196,.08);
+    background:rgba(62,240,196,.11);
+    box-shadow:inset 0 1px 0 rgba(190,255,240,.14);
     clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),
                       calc(100% - 4px) 100%,0 100%,0 4px);
   }
@@ -4880,8 +4948,9 @@ HTML = r"""<!DOCTYPE html>
     height:34px;padding:0 15px;
     display:inline-flex;align-items:center;justify-content:center;
     font:600 11px/1 "Inter","Microsoft YaHei",inherit;letter-spacing:.12em;
-    color:var(--tx-mid);background:rgba(255,255,255,.04);
-    border:1px solid var(--line-soft);
+    color:var(--tx-mid);background:rgba(255,255,255,.06);
+    border:1px solid rgba(139,92,246,.16);
+    box-shadow:inset 0 1px 0 rgba(240,232,255,.10);
     clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
                       calc(100% - 8px) 100%,0 100%,0 8px);
     cursor:pointer;transition:color .15s var(--ease),border-color .15s var(--ease);
@@ -4893,7 +4962,8 @@ HTML = r"""<!DOCTYPE html>
   /* 全局消息行：单独一行，和各区分区状态分开 */
   .gmsg{
     margin-top:10px;padding:7px 12px;font-size:12px;color:var(--tx-mid);
-    background:rgba(18,10,36,.5);border-left:2px solid var(--accent-deep);
+    background:rgba(14,7,28,.46);border-left:2px solid var(--accent-deep);
+    box-shadow:inset 0 1px 0 rgba(240,232,255,.06);
   }
 
   .hero .tagline{margin-top:11px;color:var(--tx-mid);font-size:12.5px;line-height:1.7}
@@ -4904,12 +4974,14 @@ HTML = r"""<!DOCTYPE html>
   }
   .kpi{
     position:relative;
-    background:linear-gradient(180deg,rgba(139,92,246,.06),rgba(18,10,36,.55));
-    border:1px solid var(--line-soft);
+    /* 卡片内的小宝石：半透明 + 顶部受光 + 底部压暗（不叠 blur，见铁律） */
+    background:linear-gradient(180deg,rgba(139,92,246,.10),rgba(14,7,28,.50));
+    border:1px solid rgba(139,92,246,.16);
     border-left:2px solid var(--accent-deep);
     padding:10px 13px;
     clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),
                       calc(100% - 8px) 100%,0 100%);
+    box-shadow:inset 0 1px 0 rgba(240,232,255,.10), inset 0 -1px 0 rgba(0,0,0,.26);
   }
   /* 辉光用 ::after 画在文字下层，而不是给文字加 text-shadow。
      【踩过的坑】text-shadow + overflow:hidden + text-overflow:ellipsis
@@ -4965,9 +5037,10 @@ HTML = r"""<!DOCTYPE html>
   .flow{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     margin-top:14px;padding:9px 16px;
-    border:1px solid var(--line-soft);
+    border:1px solid rgba(139,92,246,.18);
     border-left:2px solid var(--accent-deep);
-    background:linear-gradient(90deg,rgba(139,92,246,.07),rgba(18,10,36,.45));
+    background:linear-gradient(90deg,rgba(139,92,246,.10),rgba(14,7,28,.44));
+    box-shadow:inset 0 1px 0 rgba(240,232,255,.08);
     font-size:12px;color:var(--tx-mid);
   }
   .flow .fs b{color:var(--accent);margin-right:5px;font-weight:700}
@@ -5022,10 +5095,10 @@ HTML = r"""<!DOCTYPE html>
       margin-left:auto;font-family:"Cascadia Mono",Consolas,monospace;
       font-size:11px;font-weight:700;letter-spacing:.1em;
       padding:3px 10px;color:var(--accent);
-      border:1px solid rgba(139,92,246,.5);background:rgba(139,92,246,.10);
+      border:1px solid rgba(139,92,246,.5);background:rgba(139,92,246,.12);
       clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
                         calc(100% - 5px) 100%,0 100%,0 5px);
-      box-shadow:0 0 14px rgba(139,92,246,.28);
+      box-shadow:0 0 14px rgba(139,92,246,.28), inset 0 1px 0 rgba(240,232,255,.18);
     }
     .keycap.amber{
       color:var(--spark);border-color:rgba(255,154,60,.5);
@@ -5041,17 +5114,22 @@ HTML = r"""<!DOCTYPE html>
       font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
       color:var(--tx-dim);text-align:right;
     }
+    /* 表单控件 = 玻璃面板上「凹陷的槽」：填充比面板更深、底部压暗，
+       与面板的「凸起 + 顶部受光」正好相反，层次一眼可读。
+       注意：控件在卡片内部，**不加 backdrop-filter**（嵌套模糊是平方开销）。 */
     input,select{
-      background:rgba(24,14,48,.75);border:1px solid var(--line-soft);
+      background:rgba(10,5,22,.52);border:1px solid rgba(139,92,246,.18);
       color:var(--tx-hi);padding:8px 11px;font-size:13px;outline:none;width:100%;
       font-family:inherit;
       clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),
                         calc(100% - 6px) 100%,0 100%,0 6px);
+      box-shadow:inset 0 2px 6px rgba(0,0,0,.34), inset 0 -1px 0 rgba(240,232,255,.05);
       transition:all var(--t-fast) var(--ease);
     }
     input:focus,select:focus{
-      border-color:var(--accent);background:rgba(139,92,246,.08);
-      box-shadow:0 0 0 1px rgba(139,92,246,.3),0 0 16px rgba(139,92,246,.18);
+      border-color:var(--accent);background:rgba(139,92,246,.14);
+      box-shadow:0 0 0 1px rgba(139,92,246,.3),0 0 16px rgba(139,92,246,.18),
+                 inset 0 2px 6px rgba(0,0,0,.22);
     }
     select option{background:#120A24;color:var(--tx-hi)}
     /* 复选框行：整行可点，不能继承右对齐的小字标签样式 */
@@ -5091,25 +5169,51 @@ HTML = r"""<!DOCTYPE html>
       font:600 11px/1 "Inter","Microsoft YaHei",inherit;
       letter-spacing:.14em;text-transform:uppercase;
       color:var(--tx-hi);
-      background:linear-gradient(180deg,rgba(139,92,246,.16),rgba(139,92,246,.04));
+      /* 半透明填充：按钮背后也有极光，透出来才和玻璃面板是一家人 */
+      background:linear-gradient(180deg,rgba(139,92,246,.20),rgba(139,92,246,.07));
       border:1px solid rgba(139,92,246,.42);
       clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
                         calc(100% - 8px) 100%,0 100%,0 8px);
+      box-shadow:inset 0 1px 0 rgba(240,232,255,.16), inset 0 -1px 0 rgba(0,0,0,.28);
       transition:all var(--t-fast) var(--ease);
     }
-    button:hover{background:rgba(139,92,246,.28);box-shadow:0 0 18px rgba(139,92,246,.45)}
-    button:active{transform:translateY(1px)}
+    /* hover 只加深填充 + 加辉光 + 提亮顶部高光，不动 blur（性能铁律） */
+    button:hover{
+      background:linear-gradient(180deg,rgba(139,92,246,.32),rgba(139,92,246,.12));
+      box-shadow:0 0 18px rgba(139,92,246,.45),
+                 inset 0 1px 0 rgba(240,232,255,.26), inset 0 -1px 0 rgba(0,0,0,.26);
+    }
+    button:active{transform:translateY(1px);
+      box-shadow:inset 0 2px 6px rgba(0,0,0,.42), inset 0 -1px 0 rgba(240,232,255,.08)}
+    /* 主按钮 = 宝石：顶面受光最亮 → 腰身本色 → 根部压深，
+       加上下两条 inset 棱线，转出来的就是「一块切好的紫水晶」。 */
     button.primary{
-      background:linear-gradient(180deg,var(--accent-blue),var(--accent-ultra));
-      border-color:rgba(139,92,246,.8);
-      box-shadow:0 0 20px rgba(42,108,255,.45);
+      background:linear-gradient(180deg,#C9B2FF 0%,var(--accent) 42%,
+                                 var(--accent-deep) 76%,#3B1478 100%);
+      border-color:rgba(196,178,255,.65);
+      color:#FFFFFF;
+      text-shadow:0 1px 2px rgba(20,4,48,.55);
+      box-shadow:0 0 22px rgba(139,92,246,.5),
+                 inset 0 1px 0 var(--gem-hi), inset 0 -2px 6px var(--gem-low);
     }
-    button.primary:hover{box-shadow:0 0 26px rgba(42,108,255,.7)}
+    button.primary:hover{
+      box-shadow:0 0 34px rgba(139,92,246,.75),
+                 inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 6px var(--gem-low);
+    }
+    button.primary:active{
+      box-shadow:0 0 12px rgba(139,92,246,.4),
+                 inset 0 2px 8px var(--gem-low), inset 0 -1px 0 rgba(255,255,255,.12);
+    }
     button.stop{
-      background:linear-gradient(180deg,rgba(255,45,75,.22),rgba(255,45,75,.05));
+      background:linear-gradient(180deg,rgba(255,45,75,.26),rgba(255,45,75,.08));
       border-color:rgba(255,45,75,.48);color:#FFD2DA;
+      box-shadow:inset 0 1px 0 rgba(255,210,218,.18), inset 0 -1px 0 rgba(0,0,0,.28);
     }
-    button.stop:hover{background:rgba(255,45,75,.32);box-shadow:0 0 18px rgba(255,45,75,.35)}
+    button.stop:hover{
+      background:linear-gradient(180deg,rgba(255,45,75,.36),rgba(255,45,75,.12));
+      box-shadow:0 0 18px rgba(255,45,75,.4),
+                 inset 0 1px 0 rgba(255,210,218,.26), inset 0 -1px 0 rgba(0,0,0,.26);
+    }
 
     /* ---------- 状态条 ---------- */
     .status{
@@ -5135,10 +5239,11 @@ HTML = r"""<!DOCTYPE html>
        带「以管理员身份重启」按钮（调 relaunch_as_admin） */
     .elevban{
       display:none;margin-top:12px;
-      border:1px solid rgba(255,154,60,.5);background:rgba(255,154,60,.10);
+      border:1px solid rgba(255,154,60,.5);background:rgba(255,154,60,.12);
       color:var(--spark);padding:10px 14px;font-size:12px;line-height:1.7;
       clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
                         calc(100% - 8px) 100%,0 100%,0 8px);
+      box-shadow:inset 0 1px 0 rgba(255,210,150,.14);
     }
     .elevban.show{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     .elevban .eb-txt{flex:1 1 260px}
@@ -5150,12 +5255,19 @@ HTML = r"""<!DOCTYPE html>
     .elevban button:hover{background:rgba(255,154,60,.30)}
     .warn{
       margin-top:14px;border:1px solid rgba(255,154,60,.38);
-      background:rgba(255,154,60,.08);color:var(--spark);
+      background:rgba(255,154,60,.10);color:var(--spark);
       padding:10px 13px;font-size:12px;
       clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
                         calc(100% - 8px) 100%,0 100%,0 8px);
+      box-shadow:inset 0 1px 0 rgba(255,210,150,.14);
     }
     @media (prefers-reduced-motion:reduce){ *{animation:none!important} }
+    /* 系统级「减少透明」：玻璃是装饰，可读性永远优先（退回近实色面板） */
+    @media (prefers-reduced-transparency:reduce){
+      body::before,body::after{display:none}
+      .panel,.cfg-panel{background:linear-gradient(160deg,#180E30 0%,#120A24 100%)}
+      .panel,.cfg-panel,.titlebar{-webkit-backdrop-filter:none;backdrop-filter:none}
+    }
   /* ---------- 配置面板（导入/导出/方案） ---------- */
   /* 【默认必须隐藏】这个面板只在点齿轮按钮时出现。之前漏写 display:none，
      div 按默认 block 渲染 → 程序一启动就挂在右上角；而 toggleCfg() 读的是
@@ -5163,9 +5275,13 @@ HTML = r"""<!DOCTYPE html>
      「当前没开」→ 又设成 block（毫无变化）→ 第二次点才真隐藏。
      现在默认隐藏 + 用 class 切换，两种错都不会再犯。 */
   .cfg-panel{ position:fixed; top:34px; right:10px; z-index:50; width:300px;
-    background:var(--panel); border:1px solid var(--line);
-    border-radius:var(--chamfer); padding:12px;
-    box-shadow:0 10px 40px rgba(0,0,0,.5); display:none; }
+    /* 浮层是玻璃的最佳场景：糊住背后的极光 + 面板，浮起来 */
+    background:linear-gradient(170deg, rgba(48,28,88,.58) 0%, rgba(16,8,32,.62) 100%);
+    -webkit-backdrop-filter:blur(26px) saturate(var(--glass-sat));
+    backdrop-filter:blur(26px) saturate(var(--glass-sat));
+    border:1px solid var(--glass-edge); border-radius:var(--chamfer); padding:12px;
+    box-shadow:0 18px 50px rgba(2,0,10,.6), inset 0 1px 0 rgba(240,232,255,.13);
+    display:none; }
   .cfg-panel.open{ display:block; }
   .cfg-sec{ margin-bottom:12px; }
   .cfg-sec:last-of-type{ margin-bottom:0; }
@@ -5173,9 +5289,10 @@ HTML = r"""<!DOCTYPE html>
     text-transform:uppercase; margin-bottom:7px; }
   .cfg-row{ display:flex; gap:6px; flex-wrap:wrap; }
   .cfg-btn{ flex:1; min-width:0; padding:7px 8px; font-size:12px; cursor:pointer;
-    color:var(--tx-hi); background:rgba(139,92,246,.10);
-    border:1px solid var(--line); border-radius:7px; }
-  .cfg-btn:hover{ background:rgba(139,92,246,.20); }
+    color:var(--tx-hi); background:rgba(139,92,246,.12);
+    border:1px solid rgba(139,92,246,.22); border-radius:7px;
+    box-shadow:inset 0 1px 0 rgba(240,232,255,.12); }
+  .cfg-btn:hover{ background:rgba(139,92,246,.22); }
   .cfg-btn.danger{ color:#ff9a9a; border-color:rgba(255,120,120,.35);
     background:rgba(255,120,120,.10); }
   .cfg-sel{ width:100%; margin-bottom:7px; padding:6px; font-size:12px;
