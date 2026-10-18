@@ -99,12 +99,25 @@ VK_SCROLL = 0x91
 # 起点应该是「用户主动给的第一个动作」或者「倒数结束」。
 #
 #   now          点按钮就开始（旧行为，兼容脚本调用）
-#   first_click  第一次鼠标按下才作为第 0 步开始 —— 推荐
+#   first_click  第一次鼠标按下才作为第 0 步开始
 #   countdown    倒数 N 秒后开始（给了切窗口的时间）
+#   wait_key     装好钩子但一条都不记，等启停键（F7）才开录 —— v41 默认
+#
+# 【wait_key 为什么成为默认（2026-10-18 主人实测反馈）】
+# 「点开始录制 → 直接就在录」和「按 F7 才录」两种心智模型混在一起时，
+# 用户按下 F7 只是把会话收尾了，看到的却是「窗口一闪什么都没发生」。
+# 新流程把两件事分开：
+#   ① 点「开始录制」= 进入待命（钩子装好、不记账、窗口不最小化）
+#   ② 按 F7 = 真的开始录（此刻窗口才让位）
+#   ③ 再按 F7 = 暂停记账（窗口回来，步骤可见）
+#   ④ 点「停止录制」= 收尾定稿
+# 待命期间钩子只做一件轻活（判 hotkey 的 vk 就丢），不会污染事件表。
 START_NOW = "now"
 START_FIRST_CLICK = "first_click"
 START_COUNTDOWN = "countdown"
-START_MODES = (START_NOW, START_FIRST_CLICK, START_COUNTDOWN)
+START_WAIT_KEY = "wait_key"
+START_MODES = (START_NOW, START_FIRST_CLICK, START_COUNTDOWN,
+               START_WAIT_KEY)
 
 # 等首次点击的上限：超过就自动收场。
 # 否则用户点完「开始录制」就走开了，两个低级钩子会一直挂在系统里。
@@ -268,6 +281,8 @@ class Recorder(object):
         self._last_move = None         # (x, y)
         self._last_move_t = 0.0
 
+        self._paused = False       # v41：暂停记账（钩子不卸，F7 再按继续）
+        self._pause_at = None      # 暂停起点（恢复时把这段时长从时间轴上扣掉）
         self._running = False
         self._thread = None
         self._tid = 0
@@ -324,6 +339,7 @@ class Recorder(object):
                 "secs": round(secs, 1),
                 "started": bool(self._started), "armed": armed,
                 "waited": round(waited, 1),
+                "paused": bool(self._paused),
                 "mode": self.start_mode,
                 "overflow": self.overflow, "error": self._error}
 
@@ -360,6 +376,8 @@ class Recorder(object):
         self._arm_cancel.clear()
         self._error = None
         self.overflow = None
+        self._paused = False
+        self._pause_at = None
         self._stop_event.clear()
 
         ready = {}
@@ -444,6 +462,50 @@ class Recorder(object):
             self._t0 = time.perf_counter()
         self._armed_at = None
         self._arm_cancel.set()
+
+    # -- 外部控制（v41：F7 三态） --------------------------------------
+    def begin(self):
+        """
+        待命 → 开录。F7 按下时由 dashboard 调。
+
+        返回 True 表示这次调用真的切了状态。已经开录/没在录都返回 False
+        ——调用方据此决定要不要提示，避免「按了没反应也不知道为什么」。
+        """
+        if not self._running or self._started:
+            return False
+        self._begin()
+        return True
+
+    def pause(self):
+        """
+        暂停记账（F7 第二下）。钩子不卸：卸了再装会漏事件，
+        而且暂停期间用户可能还在按着键，卸钩后抬起事件就丢了。
+
+        返回 True 表示这次真的从「录制中」切到了「暂停」。
+        """
+        if not self._running or not self._started or self._paused:
+            return False
+        self._flush_held()          # 按着的键先补抬起，避免回放时「一直按住」
+        with self._lock:
+            self._paused = True
+            self._pause_at = time.perf_counter()
+        return True
+
+    def resume(self):
+        """
+        暂停 → 继续录（F7 第三下）。
+
+        时间轴要「扣掉暂停那段」：否则用户暂停去泡杯茶回来，
+        第一步和第二步之间会出现几分钟的空等（回放时真等那么久）。
+        """
+        if not self._running or not self._paused:
+            return False
+        with self._lock:
+            if self._t0 is not None and self._pause_at is not None:
+                self._t0 += time.perf_counter() - self._pause_at
+            self._paused = False
+            self._pause_at = None
+        return True
 
     # -- 录制逻辑（纯函数，探针可以直接喂结构体调） -------------------
     def _now_ms(self):
@@ -571,6 +633,10 @@ class Recorder(object):
             return
         if vk in self.skip_vks:
             return
+        # v41 暂停：一条都不记（stop_vks 的判定在上一步，所以暂停中
+        # 按 Pause 仍然能收尾——这是「暂停后想直接结束」的退路）。
+        if self._paused:
+            return
 
         drop, _ = self._should_drop_injected(info.dwExtraInfo, info.flags,
                                              LLKHF_INJECTED)
@@ -592,6 +658,8 @@ class Recorder(object):
 
     def feed_mouse(self, wparam, info):
         """处理一条鼠标事件。"""
+        if self._paused:
+            return
         x, y = int(info.pt.x), int(info.pt.y)
 
         drop, _ = self._should_drop_injected(info.dwExtraInfo, info.flags,

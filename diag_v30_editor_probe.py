@@ -396,7 +396,7 @@ def test_edit_api(tmpdir):
 # 7. 前端接线静态断言
 # ----------------------------------------------------------------------
 def test_frontend():
-    sec("7. 前端接线：列表 / 弹窗 / 起点选择都在，旧引用清干净")
+    sec("7. 前端接线：列表 / 弹窗 / 启停键流程提示都在，旧引用清干净")
     p = os.path.join(HERE, "ui", "dashboard.html")
     html = open(p, encoding="utf-8").read()
     # 内嵌副本也要有（双源必须同步，规则 12/19）
@@ -406,7 +406,9 @@ def test_frontend():
     for name, src in (("文件", html), ("内嵌", emb)):
         check("%s：步骤列表容器在" % name, 'id="macSteps"' in src)
         check("%s：节点设置弹窗在" % name, 'id="macModal"' in src)
-        check("%s：起点下拉在" % name, 'id="macStart"' in src)
+        # v41：起点下拉被启停键流程取代（主人要的是「开始→F7→操作→F7→停止」）
+        check("%s：启停键流程提示在" % name, 'id="macFlowHint"' in src)
+        check("%s：已无旧起点下拉" % name, 'id="macStart"' not in src)
         check("%s：没有残留 macPreview 引用" % name, "macPreview" not in src)
         check("%s：调用 macro_steps" % name, "macro_steps(" in src)
         check("%s：调用 macro_step_set" % name, "macro_step_set" in src)

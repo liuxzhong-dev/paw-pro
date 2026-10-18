@@ -51,6 +51,7 @@ diag_v30_editor_probe.py
 diag_v34_probe.py
 diag_v35_e2e_replay.py
 diag_bg_probe.py
+diag_v41_flow_probe.py
 "
 
 echo "[0/2] 逐个核对脚本存在（名字写错会静默跳过，必须先卡住）"

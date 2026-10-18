@@ -246,6 +246,11 @@ HOTKEY_PAUSE_FALLBACK = ["pause", "scrolllock", "ctrl+pause"]
 #   且 F7 在绝大多数软件里没有默认含义（浏览器里也不是常用功能键）。
 HOTKEY_MACRO_FALLBACK = ["F7", "Ctrl+F7", "F10"]
 
+# 【v41】待命（点了「开始录制」但还没按启停键）的最长等待。
+# 钩子已经装在系统里，不能永久挂着；但 30 秒（first_click 的 ARM_TIMEOUT）
+# 对「先点开始、再去调参数、再按 F7」这种节奏太紧，给 10 分钟。
+WAIT_KEY_TIMEOUT = 600.0
+
 
 # ======================================================================
 # 原始输入：用来「识别」用户实际按下的鼠标侧键
@@ -3405,6 +3410,7 @@ class Api(object):
             from core.recorder import summarize
             info = summarize(events)
             preview = info["preview"]
+        trig = self._trigger_label("macro")
         out = {"ok": True, "recording": False, "playing": bool(_MACRO["playing"]),
                "name": _MACRO.get("name", ""),
                "count": info["count"], "secs": info["secs"],
@@ -3416,8 +3422,12 @@ class Api(object):
                # v34：宏有了自己的启停键，界面必须显示**真键名**（降级后可能是
                # Ctrl+F7），写死 F7 会出现「照提示按了没反应」的老毛病。
                # 暂停态也要回：回放中按 F7 定住后，界面上得看得出来是暂停不是卡死。
-               "trig": self._trigger_label("macro"),
+               "trig": trig,
+               # paused 是「回放暂停」（pausectl 分区位）；rec_paused 是
+               # 「录制暂停」（v41 新流程，F7 第二下）。两者语义不同，
+               # 界面文案也不同，千万别合并成一个字段。
                "paused": bool(pausectl.is_paused("macro")),
+               "rec_paused": False,
                "armed": False, "started": True, "waited": 0, "overflow": ""}
         if rec is not None and rec.running:
             st = rec.stats()
@@ -3426,15 +3436,20 @@ class Api(object):
                        armed=bool(st.get("armed")),
                        started=bool(st.get("started")),
                        waited=st.get("waited", 0),
+                       rec_paused=bool(st.get("paused")),
                        mode=st.get("mode", ""))
             if st["overflow"]:
                 out["preview"] = {"events": "动作太多，已自动停止录制",
                                   "seconds": "录制超时，已自动停止录制"} \
                     .get(st["overflow"], "")
-            elif st.get("armed"):
-                out["preview"] = "等起点…（已等 %.1f 秒）" % st.get("waited", 0)
+            elif not st.get("started"):
+                # v41 待命态：钩子装好了但一条不记，等启停键。
+                # 文案必须写明「此刻没在录」，否则用户以为已经在录了。
+                out["preview"] = "待命中：按 %s 开始录制" % trig
+            elif st.get("paused"):
+                out["preview"] = "已暂停：再按 %s 继续，或点「停止录制」结束" % trig
             else:
-                out["preview"] = "录制中……"
+                out["preview"] = "录制中……（按 %s 暂停）" % trig
         return out
 
     def macro_start_record(self, ignore_injected=True,
@@ -3471,9 +3486,26 @@ class Api(object):
         _MACRO["steps"] = []
         _MACRO["name"] = ""
         _macro_bump()
+
+        # 【v41】启停键本身绝对不能录进事件表：RegisterHotKey 和低级键盘
+        # 钩子是两套机制，钩子照样收得到 F7。录进去的后果是回放到那一步
+        # 会自己按一下 F7 → toggle_macro 被触发 → 回放被暂停，看起来像
+        # 「回放卡死」。所以按当前生效的键名解析出 vk，加入 skip 集合。
+        try:
+            _mk = (self._hotkeys.get("macro") or (None,))[0]
+            _parsed = hk.parse_key(_mk) if _mk else None
+            if _parsed:
+                rec.skip_vks = frozenset(set(rec.skip_vks) | {int(_parsed[1])})
+        except Exception as e:
+            _log("宏启停键屏蔽失败（不致命）：%r" % (e,))
+
         _log("宏录制开始（起点=%s / 过滤注入事件=%s）"
              % (rec.start_mode, bool(ignore_injected)))
-        if rec.start_mode == "first_click":
+        trig = self._trigger_label("macro")
+        if rec.start_mode == "wait_key":
+            # 待命：钩子已装好但一条都不记，窗口留在前台让用户按 F7。
+            tip = "待命中：按 %s 开始录制（此刻还没开始记）" % trig
+        elif rec.start_mode == "first_click":
             tip = ("已就绪：切到目标程序，第一次点击就是起点"
                    "（按 Pause 结束录制）")
         elif rec.start_mode == "countdown":
@@ -3481,10 +3513,16 @@ class Api(object):
         else:
             tip = "录制中：去目标程序操作，按 Pause 键结束录制"
         ST.set_msg(tip)
-        toast.show_custom("开始录制：按 Pause 结束", "start")
-        # 录完要能看见界面，所以录制期间把窗口最小化让位给目标程序，
-        # 结束时 _macro_finish 会自动把它叫回来。
-        self._hide_if_needed(True)
+        if rec.start_mode == "wait_key":
+            toast.show_custom("待命中\n按 %s 开始录制" % trig, "start")
+        else:
+            toast.show_custom("开始录制：按 Pause 结束", "start")
+        # 录完要能看见界面，所以**真正开始录**时把窗口最小化让位给目标
+        # 程序，结束时 _macro_finish 会自动把它叫回来。
+        # 【v41】wait_key 待命阶段不能最小化：用户还要在界面上按 F7、
+        # 看状态；最小化了等于把「开始」按钮藏起来。
+        if rec.start_mode != "wait_key":
+            self._hide_if_needed(True)
         threading.Thread(target=self._macro_watch, name="macrowatch",
                          daemon=True).start()
         return {"ok": True, "msg": tip, "mode": rec.start_mode}
@@ -3499,18 +3537,42 @@ class Api(object):
             if rec.stop_requested:
                 break
             # v30：等起点也会等丢人。钩子装好了却一直不用，它就一直挂着。
+            # v41：wait_key 待命是「等人按 F7」，用户可能先去调别的，
+            # 30 秒太短；给 10 分钟，超时仍然自动收尾（钩子不能永久挂着）。
             st = rec.stats()
-            if not st.get("started") and st.get("waited", 0) >= ARM_TIMEOUT:
-                rec.arm_timeout = True
-                break
+            if not st.get("started"):
+                limit = (WAIT_KEY_TIMEOUT
+                         if rec.start_mode == "wait_key" else ARM_TIMEOUT)
+                if st.get("waited", 0) >= limit:
+                    rec.arm_timeout = True
+                    rec.arm_timeout_mode = rec.start_mode
+                    break
             time.sleep(0.2)
         if rec.running:
             self._macro_finish(auto=True)
 
     def macro_stop_record(self):
-        """用户点按钮结束录制（与按 Pause 走同一条收尾路径）。"""
+        """
+        用户点「停止录制」结束整个录制会话。
+
+        v41 新增一个前置分支：还在待命（没按过 F7）时点停止 = 空会话，
+        直接取消。走收尾路径的话会压缩出一份空步骤表，再提示
+        「一步都没录到」——听起来像程序出错，其实用户只是反悔了。
+        """
         if not _macro_recording():
             return {"ok": False, "msg": "当前没有在录制"}
+        rec = _MACRO.get("rec")
+        st = rec.stats() if rec is not None else {}
+        if rec is not None and not st.get("started"):
+            rec.cancel()
+            _MACRO["events"] = []
+            _MACRO["steps"] = []
+            _macro_bump()
+            ST.set_msg("已取消录制（还没按启停键开始）")
+            toast.show_custom("已取消录制", "stop")
+            _log("宏录制取消：待命态点了停止录制")
+            return {"ok": True, "msg": "已取消录制（还没开始）",
+                    "count": 0, "secs": 0, "step_ver": _MACRO["step_ver"]}
         return self._macro_finish(auto=False)
 
     def _macro_finish(self, auto=False):
@@ -3537,8 +3599,13 @@ class Api(object):
             self.show_from_tray()      # show + SetForegroundWindow
         overflow = rec.overflow
         armed_timeout = bool(getattr(rec, "arm_timeout", False))
+        arm_mode = getattr(rec, "arm_timeout_mode", "first_click")
         rec.arm_timeout = False
-        if armed_timeout:
+        rec.arm_timeout_mode = ""
+        if armed_timeout and arm_mode == "wait_key":
+            msg = ("待命超过 10 分钟没等到启停键，已自动取消录制"
+                   "（点「开始录制」后请按启停键开始）")
+        elif armed_timeout:
             msg = ("等了 30 秒没等到第一次点击，已自动取消录制"
                    "（先点「开始录制」再切到目标程序点一下）")
         elif overflow == "events":
@@ -3835,9 +3902,36 @@ class Api(object):
         """
         trig = self._hotkey_label("macro")
         if _macro_recording():
-            self.macro_stop_record()
-            _log("触发键 %s：录制中 -> 停止录制" % trig)
-            return {"ok": True, "msg": "已停止录制"}
+            rec = _MACRO.get("rec")
+            st = rec.stats() if rec is not None else {}
+            # ① 待命（点了开始、还没按启停键）→ 现在开录
+            if not st.get("started"):
+                if rec is not None and rec.begin():
+                    ST.set_msg("开始录制 · 再按 %s 暂停，点「停止录制」结束"
+                               % trig)
+                    toast.show_custom("开始录制\n再按 %s 暂停" % trig, "start")
+                    self._hide_if_needed(True)
+                    _log("触发键 %s：待命 -> 开始录制" % trig)
+                    return {"ok": True, "msg": "开始录制"}
+                return {"ok": False, "msg": "开始录制失败：录制器状态异常"}
+            # ② 已暂停 → 继续录
+            if st.get("paused"):
+                if rec is not None and rec.resume():
+                    ST.set_msg("继续录制 · 再按 %s 暂停" % trig)
+                    toast.show_custom("继续录制\n再按 %s 暂停" % trig, "start")
+                    self._hide_if_needed(True)
+                    _log("触发键 %s：录制暂停 -> 继续" % trig)
+                    return {"ok": True, "msg": "继续录制"}
+                return {"ok": False, "msg": "继续录制失败：录制器状态异常"}
+            # ③ 录制中 → 暂停（窗口叫回来，让用户能看已录的步骤）
+            if rec is not None and rec.pause():
+                self.show_from_tray()
+                ST.set_msg("录制已暂停 · 再按 %s 继续，或点「停止录制」结束"
+                           % trig)
+                toast.show_custom("录制已暂停\n再按 %s 继续" % trig, "pause")
+                _log("触发键 %s：录制中 -> 暂停" % trig)
+                return {"ok": True, "msg": "录制已暂停"}
+            return {"ok": False, "msg": "暂停失败：录制器状态异常"}
 
         if _MACRO.get("playing"):
             now = pausectl.set_paused(not pausectl.is_paused("macro"),
@@ -4942,6 +5036,9 @@ HTML = r"""<!DOCTYPE html>
       box-shadow:0 24px 60px rgba(60,32,100,.24),inset 0 1.5px 0 rgba(255,255,255,.95);
     }
     html.light .crop-mask{background:rgba(40,20,70,.28)}
+    /* v41 外观模态在浅色主题下换白底：深紫浮层压在纸白上会发脏 */
+    html.light .look-box{background:linear-gradient(170deg,#FFFFFF 0%,#F2ECFA 100%);
+      border-color:rgba(120,92,170,.34)}
     /* 「停止」按钮在浅底上粉色字太淡 → 压深一档 */
     html.light button.stop{color:#B3122F}
     /* 主按钮上的白字不能跟着 token 变深 */
@@ -5139,6 +5236,18 @@ HTML = r"""<!DOCTYPE html>
     .macro .mc-inline input[type=number]{flex:1 1 90px;min-width:0;width:auto}
     .macro .mc-inline select{flex:1 1 90px;min-width:0;width:auto}
     .macro .mc-inline button{flex:0 0 auto;width:auto;min-width:0;padding:8px 12px}
+    .macro .mc-flow-lead{font-size:11px;color:var(--tx-dim);flex:1 1 auto;
+      text-align:right;white-space:nowrap}
+    .macro .mc-flow-lead b{color:var(--accent);font-size:12px;
+      font-family:"JetBrains Mono",Consolas,monospace}
+    .macro .mc-flow-hint{
+      margin-top:7px;padding:5px 8px;border-radius:6px;
+      font-size:10.5px;line-height:1.45;color:var(--tx-mid);
+      background:linear-gradient(180deg,rgba(0,0,0,.20),rgba(255,255,255,.03));
+      border:1px solid var(--slot-edge);
+    }
+    .macro .mc-flow-hint b{color:var(--accent);font-size:11.5px;
+      font-family:"JetBrains Mono",Consolas,monospace}
     .macro .mc-check{
       display:flex;align-items:center;gap:6px;margin-top:8px;
       font-size:11px;color:var(--tx-mid);cursor:pointer;
@@ -5978,6 +6087,47 @@ HTML = r"""<!DOCTYPE html>
   .crop-btns{display:flex;gap:8px;margin-top:auto}
   .crop-btns .cfg-btn{flex:1}
   .crop-btns .primary{flex:1.4;min-width:0}
+  /* ---------- v41 外观面板（居中模态）----------
+     主人反馈：齿轮和图片按钮打开的是**同一个**面板，两个入口语义不同。
+     拆开后职责单一：
+       · 齿轮  → 右上角 .cfg-panel：导入 / 导出 / 方案（再点收起）
+       · 图片  → 居中 .look-modal：背景 / 透明度 / 按钮样式（再点收起）
+     模态复用裁剪框的玻璃语言（大圆角 + rim + 多层阴影），头部固定、
+     正文内部滚动——窗口矮时按钮不会被推出屏幕，滚轮不会被页面吃掉。 */
+  .look-modal{position:fixed;inset:0;z-index:70;display:none;
+    align-items:center;justify-content:center;padding:20px}
+  .look-modal.open{display:flex}
+  .look-mask{position:absolute;inset:0;background:rgba(4,2,12,.62)}
+  .look-box{position:relative;width:min(660px,94vw);
+    max-height:min(80vh,780px);display:flex;flex-direction:column;
+    background:linear-gradient(170deg, rgba(48,28,88,.94) 0%, rgba(16,8,32,.96) 100%);
+    border:1px solid var(--glass-edge-lit);border-radius:var(--radius-liquid);
+    box-shadow:0 26px 70px rgba(2,0,10,.72), inset 0 1.5px 0 var(--rim-hi),
+               inset 0 -1px 0 var(--rim-lo);
+    animation:lookIn .16s var(--ease)}
+  @keyframes lookIn{from{opacity:0;transform:translateY(8px) scale(.985)}
+                    to{opacity:1;transform:none}}
+  .look-head{display:flex;align-items:center;gap:10px;flex:none;
+    padding:13px 16px 11px;border-bottom:1px solid var(--slot-edge)}
+  .look-title{font-size:13px;font-weight:600;color:var(--tx-hi);letter-spacing:.5px}
+  .look-sub{font-size:10.5px;color:var(--tx-dim);flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .look-x{flex:none;width:22px;height:22px;padding:0;border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    background:transparent;border:1px solid var(--slot-edge);color:var(--tx-mid);
+    letter-spacing:0;text-transform:none}
+  .look-x:hover{color:var(--tx-hi);border-color:var(--glass-edge-lit)}
+  .look-body{overflow-y:auto;overscroll-behavior:contain;
+    padding:12px 16px 14px;scrollbar-width:thin;
+    scrollbar-color:rgba(151,115,210,.35) transparent}
+  .look-body::-webkit-scrollbar{width:6px}
+  .look-body::-webkit-scrollbar-thumb{background:rgba(151,115,210,.35);border-radius:3px}
+  /* 模态宽，缩略图给大一点才看得出配色的差别 */
+  .look-body .bg-card .bg-thumb{height:58px}
+  .look-body .bs-demo{width:52px;height:18px}
+  /* 标题栏入口的「当前打开」态：不然用户不知道这两个钮是不是开关 */
+  .tb-btn.on{background:rgba(151,115,210,.22);color:var(--crystal-lift);
+    border-color:rgba(151,115,210,.45)}
 </style>
 </head>
 <body>
@@ -6012,14 +6162,14 @@ HTML = r"""<!DOCTYPE html>
     <span class="tb-ver">PAW PRO · 键鼠自动化</span>
   </div>
   <div class="tb-right">
-    <button class="tb-btn" id="bgBtn" title="外观：背景 / 裁剪 / 面板透明度 / 按钮样式" onclick="openAppearance()">
+    <button class="tb-btn" id="bgBtn" title="外观：背景 / 裁剪 / 面板透明度 / 按钮样式（再点关闭）" onclick="toggleLook()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2"/>
         <circle cx="8.5" cy="8.5" r="1.5"/>
         <path d="M21 15l-5-5L5 21"/>
       </svg>
     </button>
-    <button class="tb-btn" id="cfgBtn" title="配置导入 / 导出 / 方案" onclick="toggleCfg()">
+    <button class="tb-btn" id="cfgBtn" title="设置：配置导入 / 导出 / 方案（再点关闭）" onclick="toggleCfg()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -6059,6 +6209,37 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="cfg-hint">导入前自动备份当前配置；触发键绑定需在本地重设（设备相关）。</div>
   </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">配置方案</div>
+    <input type="text" id="cfgProfileName" class="cfg-sel" placeholder="方案名">
+    <select id="cfgProfileSel" class="cfg-sel"><option value="">— 选择方案 —</option></select>
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="saveProfile()">存为方案</button>
+      <button class="cfg-btn" onclick="loadProfile()">加载</button>
+      <button class="cfg-btn danger" onclick="delProfile()">删除</button>
+    </div>
+    <div class="cfg-hint">方案保存在程序目录的 profiles/ 文件夹，可跨机器拷贝分享。</div>
+  </div>
+  <div class="cfg-msg" id="cfgMsg"></div>
+</div>
+
+<!-- v41 外观面板（居中模态）：主人反馈「齿轮和图片按钮打开的是同一个
+     面板」，两个入口语义不同就该是两个界面。这里只放「长什么样」相关的：
+     背景 / 质感·透明度 / 按钮样式；导入导出与方案留在右上角的设置面板。
+     两个浮层互斥（打开一个就收起另一个），点遮罩、Esc、右上角 ✕ 都能关。 -->
+<div class="look-modal" id="lookModal">
+  <div class="look-mask" onclick="toggleLook()"></div>
+  <div class="look-box" role="dialog" aria-modal="true" aria-label="外观">
+    <div class="look-head">
+      <span class="look-title">外观</span>
+      <span class="look-sub">背景 · 质感 · 按钮样式（改动即时生效并保存）</span>
+      <button class="look-x" onclick="toggleLook()" title="关闭（Esc）">
+        <svg width="11" height="11" viewBox="0 0 11 11">
+          <path d="M0 0 L11 11 M11 0 L0 11" stroke="currentColor" stroke-width="1.3" fill="none"/>
+        </svg>
+      </button>
+    </div>
+    <div class="look-body">
   <div class="cfg-sec">
     <div class="cfg-sec-t">背景</div>
     <div class="bg-grid" id="bgGrid">
@@ -6108,18 +6289,9 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="cfg-hint">作用于各区的「① 就绪」主按钮；停止键恒为红色（语义色不随风格变）。</div>
   </div>
-  <div class="cfg-sec">
-    <div class="cfg-sec-t">配置方案</div>
-    <input type="text" id="cfgProfileName" class="cfg-sel" placeholder="方案名">
-    <select id="cfgProfileSel" class="cfg-sel"><option value="">— 选择方案 —</option></select>
-    <div class="cfg-row">
-      <button class="cfg-btn" onclick="saveProfile()">存为方案</button>
-      <button class="cfg-btn" onclick="loadProfile()">加载</button>
-      <button class="cfg-btn danger" onclick="delProfile()">删除</button>
+      <div class="cfg-msg" id="lookMsg"></div>
     </div>
-    <div class="cfg-hint">方案保存在程序目录的 profiles/ 文件夹，可跨机器拷贝分享。</div>
   </div>
-  <div class="cfg-msg" id="cfgMsg"></div>
 </div>
 
 <!-- v40 裁剪对话框：选图后在此拖动 / 缩放 / 选比例，stage 框内的构图
@@ -6419,7 +6591,7 @@ HTML = r"""<!DOCTYPE html>
         <div class="tc-title">宏录制 / 回放启停</div>
         <div class="tc-body">
           <span class="tc-kbd" id="hkMacro">未绑定</span>
-          <span class="tc-hint">录制中收尾 · 回放中暂停 / 继续</span>
+          <span class="tc-hint">录制中开始 / 暂停 / 继续 · 回放中暂停 / 继续</span>
         </div>
       </div>
     </div>
@@ -6461,7 +6633,8 @@ HTML = r"""<!DOCTYPE html>
     <i></i><i></i><i></i><i></i>
     <h2><span class="dot"></span>宏录制区</h2>
     <div class="hint">
-      录制 →（首次点击为起点）→ 操作 → <b>Pause 结束</b> → 点步骤改参数 → 回放。
+      <b>① 开始录制</b>（待命，不记）→ <b>按启停键开录</b> → 操作 →
+      <b>再按启停键暂停</b>（可再按继续）→ <b>① 停止录制</b> 收尾 → 点步骤改参数 → 回放。
     </div>
 
     <div class="macro-grid">
@@ -6471,17 +6644,17 @@ HTML = r"""<!DOCTYPE html>
         <div class="tc-body" style="display:block">
           <div class="mc-inline">
             <button class="capbtn" id="macRecBtn" onclick="macToggleRecord()">开始录制</button>
-            <label for="macStart" style="margin-left:2px">起点</label>
-            <select id="macStart" title="起点决定「哪一刻算第 0 步」">
-              <option value="first_click" selected>首次点击开始</option>
-              <option value="countdown">3 秒后开始</option>
-              <option value="now">立即开始</option>
-            </select>
+            <span class="mc-flow-lead">按 <b id="macFlowKey">F7</b> 开始 / 暂停</span>
           </div>
           <label class="mc-check" for="macIgnoreInj">
             <input type="checkbox" id="macIgnoreInj" checked>
             忽略程序注入的按键
           </label>
+          <!-- v41：启停键是这个区的核心控件，单独一行写清三件事，
+               免得用户以为「开始录制」点下去就已经在录了。 -->
+          <div class="mc-flow-hint" id="macFlowHint">
+            <b id="macFlowKey2">F7</b>：开始 → 暂停 → 继续；「停止录制」才收尾
+          </div>
           <div class="status" id="macRecStatus">未录制。</div>
         </div>
       </div>
@@ -6528,7 +6701,7 @@ HTML = r"""<!DOCTYPE html>
           <!-- v34：宏的启停键。回放一启动窗口就最小化让位，
                没有热键就只能切回来点按钮，等于回放期间没法干预。 -->
           <div class="status" id="macTrigHint" style="margin-top:6px">
-            启停键 <b id="macTrigKey">F7</b>：录制中收尾 · 回放中暂停 / 继续
+            启停键 <b id="macTrigKey">F7</b>：录制中暂停 / 继续 · 回放中暂停 / 继续
           </div>
           <div class="status" id="macPlayStatus">未回放。</div>
         </div>
@@ -6713,13 +6886,21 @@ HTML = r"""<!DOCTYPE html>
     $("macStopPlayBtn").disabled = !d.playing;
 
     if(d.recording){
-      // v30：起点模式要能看出来。否则用户点完「开始录制」看界面没动静，
-      // 会以为坏了——其实它在等第一次点击。
-      const head = d.armed
-        ? ("等起点… 已等 " + Number(d.waited || 0).toFixed(1)
-           + " 秒（第一次点击即开始；按 Pause 取消）")
-        : ("录制中… 已记 " + d.count + " 条动作 / "
-           + Number(d.secs || 0).toFixed(1) + " 秒（按 Pause 结束）");
+      // v41 三态必须一眼分得开：待命（还没记）/ 录制中 / 已暂停。
+      // 老版本只说「录制中」，用户按了 F7 看到窗口回来会以为录完了，
+      // 再点「停止录制」才发现中间那段没录——状态文案是主要防线。
+      const tk = d.trig || "启停键";
+      let head;
+      if(!d.started){
+        head = "待命中：一条都还没记。按 " + tk + " 开始录制（已等 "
+               + Number(d.waited || 0).toFixed(0) + " 秒）";
+      }else if(d.rec_paused){
+        head = "已暂停：已记 " + d.count + " 条。再按 " + tk
+               + " 继续，或点「停止录制」收尾";
+      }else{
+        head = "录制中… 已记 " + d.count + " 条 / "
+               + Number(d.secs || 0).toFixed(1) + " 秒（按 " + tk + " 暂停）";
+      }
       macSetStatus("macRecStatus", d.overflow || head, true);
     }else if(d.overflow){
       macSetStatus("macRecStatus", d.overflow, true);
@@ -6735,7 +6916,13 @@ HTML = r"""<!DOCTYPE html>
     }
     // 启停键名始终显示真键（降级后可能是 Ctrl+F7）：
     // 写死 F7 会出现「照提示按了没反应」的老毛病（2026-10-15 实测过）。
-    if(d.trig) $("macTrigKey").textContent = d.trig;
+    // 真键名同步到两处（录制格的流程提示 + 回放格的说明）：
+    // 降级成 Ctrl+F7 时，写死 F7 的地方全都会变成「按了没反应」。
+    if(d.trig){
+      for(const id of ["macTrigKey", "macFlowKey", "macFlowKey2"]){
+        const el = $(id); if(el) el.textContent = d.trig;
+      }
+    }
     if(d.name) $("macName").value = d.name;
 
     // 步骤列表只在版本变了才重画：700ms 一次全量重绘会把用户
@@ -6859,6 +7046,18 @@ HTML = r"""<!DOCTYPE html>
     if(r.ok){ macStepVer = -1; await macSyncSteps(); macEditStep(r.index); }
   }
 
+  // v41：Esc 关浮层。放在捕获热键监听之后、互不干扰——那条只在
+  // 「按一下录入」期间拦键，这条只管两个设置浮层的关闭。
+  window.addEventListener("keydown", (e)=>{
+    if(e.key !== "Escape") return;
+    let hit = false;
+    const m = $("lookModal");
+    if(m && m.classList.contains("open")){ m.classList.remove("open"); hit = true; }
+    const p = $("cfgPanel");
+    if(p && p.classList.contains("open")){ p.classList.remove("open"); hit = true; }
+    if(hit) syncToolbarState();
+  });
+
   // 弹窗点遮罩关闭（点对话框本身不关）
   $("macModal").addEventListener("click", (e)=>{
     if(e.target && e.target.id === "macModal") macCloseModal();
@@ -6873,11 +7072,12 @@ HTML = r"""<!DOCTYPE html>
       const r = await macCall("macro_stop_record");
       macSetStatus("macRecStatus", r.msg, true);
     }else{
-      // v30：起点模式一起送过去。默认「首次点击」——
-      // 点完「开始录制」到切进目标程序之间的点击/移动不会被录进来。
-      const mode = $("macStart").value || "first_click";
+      // v41：固定 wait_key —— 点「开始录制」只是待命（钩子装好、一条不记），
+      // 真正开录由启停键触发。这样「开始」和「在录」是两件事，
+      // 不会再把切窗口路上的点击录进去（老的 first_click 也在防这个，
+      // 但它把起点交给「第一次点击」，和启停键的心智模型打架）。
       const r = await macCall("macro_start_record", $("macIgnoreInj").checked,
-                              mode, 3);
+                              "wait_key", 3);
       macSetStatus("macRecStatus", r.msg, true);
     }
     await macPoll();
@@ -7898,13 +8098,22 @@ HTML = r"""<!DOCTYPE html>
      改用 classList + CSS 的 .open，显示状态只有一个来源。 */
   function toggleCfg(){
     const p = $("cfgPanel"); if(!p) return;
-    p.classList.toggle("open");
-    if(p.classList.contains("open")) refreshProfiles();
+    const open = p.classList.toggle("open");
+    if(open){
+      // 与外观模态互斥：两个浮层叠着会互相遮罩（看起来像点了没反应）
+      const m = $("lookModal"); if(m) m.classList.remove("open");
+      refreshProfiles();
+    }
+    syncToolbarState();
   }
   function cfgMsg(msg, err){
-    const el = $("cfgMsg"); if(!el) return;
-    el.textContent = msg || "";
-    el.className = "cfg-msg" + (err ? " err" : "");
+    // v41：外观操作在居中模态里发生，提示不能只写进设置面板那个
+    // 已收起的容器（用户什么也看不到）。两个都写，谁在前台谁可见。
+    for(const id of ["cfgMsg", "lookMsg"]){
+      const el = $(id); if(!el) continue;
+      el.textContent = msg || "";
+      el.className = "cfg-msg" + (err ? " err" : "");
+    }
   }
   async function exportFile(){
     try{
@@ -8026,13 +8235,29 @@ HTML = r"""<!DOCTYPE html>
   // 当前生效的背景条目（裁剪取消时恢复它）
   let CUR_BG = {type:"builtin", id:"twilight", file:"", url:""};
 
-  // 标题栏图片按钮：打开配置面板并把背景节带进视野（入口与具体动作分离，
-  // 参考 Windows 11「个性化」的形态：一个总入口，里面分组管所有外观）
-  function openAppearance(){
-    const p = $("cfgPanel"); if(!p) return;
-    if(!p.classList.contains("open")) p.classList.add("open");
-    refreshProfiles();
-    const g = $("bgGrid"); if(g) g.scrollIntoView({block:"nearest"});
+  /* 标题栏两个入口是**两套界面**（v41 主人反馈后的拆分）：
+       齿轮 → 右上角设置面板（导入导出 / 方案），再点收起
+       图片 → 居中外观模态（背景 / 透明度 / 按钮样式），再点收起
+     【为什么必须互斥】两个浮层同时开着时，后开的那个的遮罩会盖住
+     先开的那个；用户点「另一个按钮」看起来毫无反应——这正是 v40 的
+     症状（两个按钮都开同一个面板，第二次点只把已开的面板再显示一次）。 */
+  function syncToolbarState(){
+    const c = $("cfgPanel"), l = $("lookModal");
+    const cb = $("cfgBtn"), lb = $("bgBtn");
+    if(cb) cb.classList.toggle("on", !!(c && c.classList.contains("open")));
+    if(lb) lb.classList.toggle("on", !!(l && l.classList.contains("open")));
+  }
+  function closeLook(){
+    const m = $("lookModal"); if(!m) return;
+    m.classList.remove("open");
+    syncToolbarState();
+  }
+  function toggleLook(){
+    const m = $("lookModal"); if(!m) return;
+    if(m.classList.contains("open")){ closeLook(); return; }
+    const p = $("cfgPanel"); if(p) p.classList.remove("open");
+    m.classList.add("open");
+    syncToolbarState();
   }
   function pickBackground(){
     const f = $("bgFile"); if(!f) return;

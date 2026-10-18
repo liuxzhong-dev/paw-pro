@@ -888,9 +888,11 @@ def test_static(tmpdir):
           (len(D.HTML), len(html)))
 
     # 【v30 按新规格改写】② 格从「已录动作摘要」换成了「步骤列表」，
-    # macPreview 被 macSteps / macStepsMore / macStart 取代。
+    # macPreview 被 macSteps / macStepsMore 取代；v41 再把「起点」下拉
+    # 换成启停键流程提示（macFlowHint / macFlowKey）。
     ids = ["cardMacro", "macRecBtn", "macIgnoreInj", "macRecStatus",
-           "macStart", "macCount", "macSecs", "macClicks", "macKeys",
+           "macFlowHint", "macFlowKey", "macCount", "macSecs", "macClicks",
+           "macKeys",
            "macSteps", "macStepsMore", "macModal", "mcName", "mcX", "mcY",
            "mcDelayType", "mcDelay", "mcAfter",
            "macSpeed", "macRepeat", "macPlayBtn", "macStopPlayBtn",

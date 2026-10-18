@@ -265,11 +265,17 @@ window.pywebview = {api: {
   // 状态行会直接红一片 —— v26 加 MKSHOT_JS 时踩过同类坑：
   // 截图里的报错到底是真 bug 还是 mock 缺件，事后分不清。
   // 这里给一份「已录好 42 步」的假数据，正好验证 ② 格的渲染。
-  macro_status:     async () => ({ok:true, recording:false, playing:false,
+  macro_status:     async () => ({ok:true, playing:false,
                                   name:"每日签到", count:6, secs:12.4,
                                   preview:"点击 · 左键 · (789, 2444) → …",
                                   clicks:5, keys:1, overflow:"", step_ver:3,
-                                  armed:false, started:true, waited:0,
+                                  waited:0,
+                                  // v41：录制三态由 MKSHOT_RECSTATE 控制，
+                                  // 用于截「待命 / 录制中 / 已暂停」三种界面。
+                                  recording:%(rec_recording)s,
+                                  started:%(rec_started)s,
+                                  armed:%(rec_armed)s,
+                                  rec_paused:%(rec_paused)s,
                                   // v34：启停键名与暂停态，缺了前端会显示
                                   // undefined（截图里的红字分不清真假 bug）
                                   trig:"F7", paused:false}),
@@ -486,7 +492,13 @@ else:
 # MKSHOT_CLICK / MKSHOT_VERIFY / MKSHOT_SELFTEST 全部静默失效，
 # 截图只剩静态 HTML（动态元素全是最初值）。因为不报错，这个坑
 # 肉眼完全看不出来。正确写法：格式化 MOCK 本身。
+# MKSHOT_RECSTATE=armed|rec|paused：宏区三态截图（默认不录）
+_rec_state = os.environ.get("MKSHOT_RECSTATE", "").strip()
 MOCK = MOCK % {
+    "rec_recording": "true" if _rec_state in ("armed", "rec", "paused") else "false",
+    "rec_started": "true" if _rec_state in ("rec", "paused") else "false",
+    "rec_armed": "true" if _rec_state == "armed" else "false",
+    "rec_paused": "true" if _rec_state == "paused" else "false",
     "bootstrap": json.dumps(BOOTSTRAP, ensure_ascii=False),
     "bg_custom": json.dumps(BG_CUSTOM or {"type": "custom", "file": "", "url": ""},
                             ensure_ascii=False),
