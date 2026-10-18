@@ -99,32 +99,35 @@ TOAST_ALPHA = 232               # 0~255
 # 主人实测反馈「UI 与主界面风格不统一」。
 #
 # 主界面的形状与色彩语言（照抄，GDI 可实现的子集）：
-#   · 深底渐变面板：rgba(139,92,246,.10) → rgba(18,10,36,.72) → rgba(24,14,48,.55)
-#   · 1px 紫色描边：rgba(139,92,246,.22) → 叠在深底上的实色近似 (45,28,82)
+#   · 深底渐变面板（v38 紫水晶）：rgba(217,194,240,.12) → rgba(46,15,92,.52) → rgba(20,8,40,.55)
+#   · 1px 紫色描边：rgba(151,115,210,.22) → 叠在深底上的实色近似 (50,34,90)
 #   · 12px 对角切角（左上 + 右下），科技风靠切角不是圆角
 #   · 顶部一条全息高光线
-#   · 文字双色：标题 #F0E8FF（粗）/ 说明 #9C8CC4（细），左对齐
+#   · 文字双色：标题 #F5F0FF（粗）/ 说明 #BDA9DC（细），左对齐
 #   · 状态色只做小面积点缀（dot / 描边暗部），不做大面积——主色 ≤15%
 # 做不到的（GDI 限制，在注释里留痕）：box-shadow 辉光、半透明叠色、
 # 动画——统一用「预乘实色近似」逼近。
-TOAST_BG_TOP = (30, 18, 57)     # 渐变顶（微亮，模拟 rgba(139,92,246,.10) 叠层）
-TOAST_BG_BOTTOM = (18, 10, 36)  # 渐变底 #120A24
-TOAST_BORDER = (45, 28, 82)     # rgba(139,92,246,.22) on #120A24 的实色近似
-TOAST_TOPLINE = (58, 21, 103)   # 顶部高光线（accent-deep 亮部的实色近似）
-TOAST_TEXT_HI = (0xF0, 0xE8, 0xFF)   # 标题色，同 --tx-hi
-TOAST_TEXT_MID = (0x9C, 0x8C, 0xC4)  # 说明色，同 --tx-mid
+# v38 紫水晶配色（2026-10-18）：accent 荧光紫 #8B5CF6 → 水晶紫 #9773D2（降饱和），
+# 底色 #120A24 → #16102E（亮一档去闷），文字去灰（tx-mid #9C8CC4 → #BDA9DC）。
+# toast 是 GDI 自绘做不了玻璃，与主界面「同色不同质」——颜色仍逐常量同源。
+TOAST_BG_TOP = (36, 22, 69)     # 渐变顶（微亮，模拟 rgba(217,194,240,.10) 叠层）
+TOAST_BG_BOTTOM = (22, 16, 46)  # 渐变底 #16102E = --panel
+TOAST_BORDER = (50, 34, 90)     # rgba(151,115,210,.22) on #16102E 的实色近似
+TOAST_TOPLINE = (91, 44, 144)   # 顶部高光线（accent-deep #5B2C90 亮部的实色近似）
+TOAST_TEXT_HI = (0xF5, 0xF0, 0xFF)   # 标题色，同 --tx-hi
+TOAST_TEXT_MID = (0xBD, 0xA9, 0xDC)  # 说明色，同 --tx-mid
 
 # 每种状态的点缀色（RGB）——语义与主界面卡片状态色对齐：
 # 运行=accent-violet、就绪=accent-mint（待命）、暂停=spark-amber、停止=text-dim、
 # 错误=alert-red。dot / 描边用它，面积小但识别度强。
 TOAST_STATE = {
-    "start":  (0x8B, 0x5C, 0xF6),   # accent-violet 已开始/已继续
+    "start":  (0x97, 0x73, 0xD2),   # accent-violet 已开始/已继续（v38 水晶紫）
     "ready":  (0x3E, 0xF0, 0xC4),   # accent-mint   已就绪
     "pause":  (0xFF, 0x9A, 0x3C),   # spark-amber   已暂停
     "warn":   (0xFF, 0x9A, 0x3C),   # spark-amber   降级/失败
     "error":  (0xFF, 0x2D, 0x4B),   # alert-red     错误
-    "stop":   (0x5F, 0x4E, 0x85),   # text-dim      已停止（中性结束）
-    "info":   (0x8B, 0x5C, 0xF6),   # accent-violet 一般信息
+    "stop":   (0x8A, 0x76, 0xB0),   # text-dim      已停止（中性结束）
+    "info":   (0x97, 0x73, 0xD2),   # accent-violet 一般信息
 }
 
 def chamfer_points():
@@ -559,14 +562,14 @@ class _ToastManager(object):
 
     def _on_paint(self, hwnd):
         """
-        紫霓虹科技风卡片（2026-10-18 v34，与主界面 ui/dashboard.html 统一）：
+        紫水晶科技风卡片（2026-10-18 v38，与主界面 ui/dashboard.html 同色不同质）：
 
-          ① 深底垂直渐变（GradientFill 两段：#1E1239 → #120A24）
+          ① 深底垂直渐变（GradientFill 两段：#241645 → #16102E）
           ② 1px 紫色描边（FrameRgn 沿六边形 region）
           ③ 顶部一条全息高光线（主界面 .panel::before 的实色近似）
           ④ 标题左侧状态圆点：外层暗色大圆模拟辉光 + 内层实色
-          ⑤ 文字双色左对齐：标题 #F0E8FF 粗体带 1px 字距，
-             说明 #9C8CC4 常规体
+          ⑤ 文字双色左对齐：标题 #F5F0FF 粗体带 1px 字距，
+             说明 #BDA9DC 常规体
 
         text 里带 "\\n" 就按两行画；不带就单行。
         为什么不直接 DT_WORDBREAK：DrawTextW 的换行只认词边界，
