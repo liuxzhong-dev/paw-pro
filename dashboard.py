@@ -1863,6 +1863,57 @@ def _settings_path():
     return os.path.join(_settings_dir(), _SETTINGS_FILE)
 
 
+def _backgrounds_dir():
+    """自定义背景图存放目录：与 ui_settings.json 同目录的 backgrounds/。
+
+    放设置目录而不是 exe 目录的硬编码子目录：便携模式（exe 同目录）下
+    它就在 exe 旁边，用户能直接看到、拷贝分享；目录不可写时退回
+    %LOCALAPPDATA%，与设置文件同路（_settings_dir 的逻辑）。
+    """
+    d = os.path.join(_settings_dir(), "backgrounds")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+def _bg_entry(bg):
+    """把设置里的 bg 字典规整成 {type, file, url}。
+
+    url 是给前端 #bgLayer 用的 dataURL（或 file:// URL）。图片文件不存在
+    （用户删了 backgrounds/ 里的图）时按 default 处理，绝不给坏链。
+    """
+    out = {"type": "default", "file": "", "url": ""}
+    try:
+        if isinstance(bg, dict) and str(bg.get("type") or "") == "custom":
+            name = os.path.basename(str(bg.get("file") or ""))
+            p = os.path.join(_backgrounds_dir(), name) if name else ""
+            if name and os.path.isfile(p):
+                out["type"] = "custom"
+                out["file"] = name
+                with open(p, "rb") as f:
+                    blob = f.read()
+                import base64 as _b64
+                mime = "image/png"
+                low = name.lower()
+                if low.endswith((".jpg", ".jpeg")):
+                    mime = "image/jpeg"
+                elif low.endswith(".webp"):
+                    mime = "image/webp"
+                elif low.endswith(".gif"):
+                    mime = "image/gif"
+                out["url"] = "data:%s;base64,%s" % (
+                    mime, _b64.b64encode(blob).decode("ascii"))
+    except Exception as e:
+        try:
+            _log("  自定义背景   : 读取失败 -> %r" % (e,))
+        except Exception:
+            pass
+        return {"type": "default", "file": "", "url": ""}
+    return out
+
+
 def _load_settings():
     """
     读界面参数。任何异常都退回空字典 —— 配置坏了不该让程序起不来。
@@ -1909,7 +1960,7 @@ def _save_settings(data):
             p = _settings_path()
             # 只保留我们自己认识的顶层键，避免旧版本残留字段堆积。
             # tray 是 v24 的正式设置；旧白名单漏了它，会造成重启后恢复默认。
-            keep = ("mouse", "key", "trigger", "window", "hide", "tray")
+            keep = ("mouse", "key", "trigger", "window", "hide", "tray", "bg")
             out = {k: v for k, v in (data or {}).items() if k in keep}
             fd, tmp = tempfile.mkstemp(
                 dir=os.path.dirname(p), prefix=".ui_settings_", suffix=".tmp")
@@ -1997,7 +2048,7 @@ class Api(object):
         if not isinstance(data, dict):
             return {"ok": False, "msg": "设置必须是字典"}
         with _SETTINGS_IO_LOCK:
-            for k in ("mouse", "key", "trigger", "window", "hide", "tray"):
+            for k in ("mouse", "key", "trigger", "window", "hide", "tray", "bg"):
                 if k not in data:
                     continue
                 v = data[k]
@@ -2040,7 +2091,95 @@ class Api(object):
             "hotkey_err": self._hotkey_err,
             "settings": self._settings,
             "trigger": self._btn_binding,
+            "bg": _bg_entry(self._settings.get("bg")),
         }
+
+    # ---- v39 自定义背景 ----
+    # 【为什么走 dataURL 而不是文件路径】pywebview 的 JS 侧拿不到选中
+    # 文件的绝对路径（浏览器安全模型），FileReader.readAsDataURL 是唯一
+    # 不依赖后端文件对话框的通路——配置导入（import_config_text）同款。
+    # 后端解码落盘到 backgrounds/，再把规范化的条目（含回读的 dataURL）
+    # 返回给前端贴到 #bgLayer；设置里只存文件名，重启后从盘上回读。
+
+    def save_background(self, data_url):
+        ok, msg = self._persist_background(data_url)
+        if not ok:
+            return {"ok": False, "msg": msg}
+        return {"ok": True, "bg": _bg_entry(self._settings.get("bg"))}
+
+    def reset_background(self):
+        try:
+            with _SETTINGS_IO_LOCK:
+                old = self._settings.get("bg")
+                self._settings["bg"] = {"type": "default"}
+                ok, err = _save_settings(self._settings)
+                if not ok:
+                    if isinstance(old, dict):
+                        self._settings["bg"] = old
+                    return {"ok": False, "msg": "保存失败：%s" % err}
+                # 设置已回默认，旧图文件留着无害（用户可能还想换回来），
+                # 但启动日志记一笔，方便主人排查「图没了」类问题。
+                name = os.path.basename(str((old or {}).get("file") or "")) \
+                    if isinstance(old, dict) else ""
+                if name:
+                    try:
+                        _log("  自定义背景   : 已恢复默认（旧文件保留 %s）"
+                             % os.path.join(_backgrounds_dir(), name))
+                    except Exception:
+                        pass
+            return {"ok": True, "bg": {"type": "default", "file": "", "url": ""}}
+        except Exception as e:
+            return {"ok": False, "msg": "恢复失败：%s" % e}
+
+    def _persist_background(self, data_url):
+        """把 dataURL 解码存盘 + 写设置。返回 (ok, msg)。"""
+        s = str(data_url or "")
+        if not s.startswith("data:image/"):
+            return False, "不是合法的图片数据"
+        try:
+            head, b64 = s.split(",", 1)
+        except ValueError:
+            return False, "图片数据不完整"
+        mime = head[5:].split(";")[0].strip().lower()
+        ext = {"image/png": ".png", "image/jpeg": ".jpg",
+               "image/webp": ".webp", "image/gif": ".gif"}.get(mime)
+        if not ext:
+            return False, "只支持 PNG / JPG / WebP / GIF"
+        try:
+            import base64 as _b64
+            blob = _b64.b64decode(b64, validate=False)
+        except Exception as e:
+            return False, "图片解码失败：%s" % e
+        if len(blob) < 64:
+            return False, "图片内容为空或过小"
+        if len(blob) > 16 * 1024 * 1024:
+            return False, "图片太大了（>16MB）"
+        try:
+            d = _backgrounds_dir()
+            name = "bg_custom" + ext
+            p = os.path.join(d, name)
+            # 同格式直接覆盖；换格式时清掉旧扩展名的残留，避免目录里
+            # 堆一串 bg_custom.png/jpg/webp（重启时只认设置里那个）。
+            for old in os.listdir(d):
+                if old.startswith("bg_custom.") and old != name:
+                    try:
+                        os.remove(os.path.join(d, old))
+                    except OSError:
+                        pass
+            with open(p, "wb") as f:
+                f.write(blob)
+            with _SETTINGS_IO_LOCK:
+                self._settings["bg"] = {"type": "custom", "file": name}
+                ok, err = _save_settings(self._settings)
+                if not ok:
+                    return False, "保存设置失败：%s" % err
+            try:
+                _log("  自定义背景   : 已保存 %s（%d 字节）" % (p, len(blob)))
+            except Exception:
+                pass
+            return True, ""
+        except Exception as e:
+            return False, "写文件失败：%s" % e
 
     # ---- 配置导入 / 导出 / 剪贴板 / 多方案 ----
     # 【为什么单独做这套】2026-10-16 主人想「把别人的配置导入进来」分享参数。
@@ -4358,11 +4497,19 @@ HTML = r"""<!DOCTYPE html>
 <title>爪Pro · Paw Pro</title>
 <style>
   :root{
-      /* ---- 底色层（v38 紫水晶：近黑但带晶体深处的紫，不发闷）---- */
-      --bg-void:#07030E;
-      --bg-abyss:#0D0720;
-      --panel:#16102E;
-      --panel-inset:#1F1542;
+      /* ---- 底色层（v39 暮光紫：主人指「背景纯黑是土的根因」）----
+         旧 v38 是近黑 #07030E + 极光，全屏发闷。参考图（栈桥暮光）的紫
+         是一条「天空梯度」：顶深紫罗兰 → 中粉紫 → 地平线暖粉 → 海面深紫蓝，
+         **全程没有纯黑**。这里把六档梯度做成 token，body 直接铺满；
+         真正的黑只留给 --abyss-deep（ vignette 压四角用，保证文字可读）。 */
+      --bg-void:#2B1F4E;      /* 梯度顶：深紫罗兰（夜空上部） */
+      --bg-abyss:#4A3578;     /* 梯度中上：紫罗兰 */
+      --bg-mid:#7B5AA6;       /* 梯度中：粉紫薰衣草 */
+      --bg-warm:#C08BB8;      /* 梯度中下：暖粉紫（天际线） */
+      --bg-sea:#3E3170;       /* 梯度底：海面深紫蓝 */
+      --abyss-deep:#0B0620;   /* 深之又深：只给 vignette/压暗层用 */
+      --panel:#1A1136;        /* 面板本色（暮光亮底上要压得住） */
+      --panel-inset:#241753;
       /* ---- 强调色（v38：荧光紫 #8B5CF6 → 紫水晶本色，降饱和去"霓虹塑料感"；
            大面积 fill/line/glow 用它；小面积点睛用 --crystal-lift 透亮紫）---- */
       --accent:#9773D2;
@@ -4399,15 +4546,15 @@ HTML = r"""<!DOCTYPE html>
       /* ---- 玻璃宝石层（v38 紫水晶：填充改四档模拟晶体内部——
            顶=受光面透亮粉紫、中=本色紫、下=根部深紫近黑；
            saturate 降到 150% 防过艳；rim/sheen/高光一律粉紫不用白）---- */
-      --glass-fill:rgba(217,194,240,.12);
-      --glass-fill-mid:rgba(46,15,92,.52);
-      --glass-fill-low:rgba(20,8,40,.55);
+      --glass-fill:rgba(217,194,240,.10);
+      --glass-fill-mid:rgba(30,18,58,.62);
+      --glass-fill-low:rgba(12,6,26,.66);
       --glass-blur:18px;
       --glass-sat:150%;
-      --glass-edge:rgba(195,166,236,.26);
+      --glass-edge:rgba(195,166,236,.28);
       --glass-edge-lit:rgba(217,194,240,.45);
       --glass-hi:rgba(217,194,240,.13);
-      --glass-shadow:0 18px 44px rgba(4,1,14,.60),0 0 30px rgba(151,115,210,.10);
+      --glass-shadow:0 18px 44px rgba(6,2,20,.60),0 0 30px rgba(151,115,210,.10);
       --gem-hi:rgba(217,194,240,.40);
       --gem-low:rgba(20,4,48,.55);
       /* ---- 液态玻璃层（v37：Apple Liquid Glass 观感）----
@@ -4435,7 +4582,15 @@ HTML = r"""<!DOCTYPE html>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%}
     body{
-      background:var(--bg-void);
+      /* v39：默认背景=暮光紫天空梯度（参考栈桥图：顶深紫罗兰→中粉紫→
+         天际暖粉→海面深紫蓝，全程无纯黑）。 */
+      background-image:linear-gradient(180deg,
+        var(--bg-void) 0%, var(--bg-abyss) 26%, var(--bg-mid) 48%,
+        var(--bg-warm) 62%, var(--bg-sea) 88%, #241D52 100%);
+      background-attachment:fixed;
+      background-position:center;
+      background-size:cover;
+      background-repeat:no-repeat;
       color:var(--tx-hi);
       font-family:"Inter","HarmonyOS Sans SC","Segoe UI","Microsoft YaHei",system-ui,sans-serif;
       font-size:13px;
@@ -4444,19 +4599,44 @@ HTML = r"""<!DOCTYPE html>
       padding:52px 24px 28px;
       overflow-x:hidden;
     }
+    /* ---------- 自定义背景层（v39：主人可换自己的图）----------
+       【为什么是 z-index:0 的普通定位元素】三条路都实测过（Edge 无头，
+       WebView2 同核，项目硬规则要求字节级验证）：
+       ① z-index:-3 的 fixed div：与 body::before(-2) 伪元素共存时
+          **整层被吞**——computed style 全对（display/backgroundImage
+          都对）就是不画。软件渲染下伪元素与真实负 z-index 子元素的
+          合成顺序 bug。
+       ② 运行中改 body/html 的 inline background-image：computed 有图，
+          截图仍是旧背景——画布（传播）背景被首轮样式快照缓存。
+       ③ 普通定位元素 + z-index:0：完全正常（面板/文字都在它之上：
+          .wrap z-index:2、.titlebar 30、.panel 相对定位且在 DOM 后）。
+       选 ③。压暗层与 vignette 直接做进本元素的多层 background
+       （图在下、压暗在上），不依赖任何跨元素层叠。 */
+    #bgLayer{
+      position:fixed;inset:0;z-index:0;pointer-events:none;
+      background-position:center;background-size:cover;
+      background-repeat:no-repeat;background-attachment:fixed;
+    }
 
-    /* ---------- 玻璃的第一层：背后必须有可糊的内容 ----------
-       【v36 为什么加这一层】backdrop-filter 只糊「元素背后已绘制的内容」。
-       纯色 #07030E 上糊什么都没变化 —— 玻璃看着像一块半透明的脏塑料。
-       所以先用三团紫/蓝极光光斑把背景「填满内容」，玻璃才有东西可折射。
-       光斑走 26s 极慢往复漂移（远慢于任何阅读节奏，不分散注意力），
-       @media prefers-reduced-motion 里已有全局 animation:none 兜底。 */
+    /* ---------- 压暗层 + 玻璃的第一层：背后必须有可糊的内容 ----------
+       【v39 为什么改】默认背景从近黑提亮成暮光紫天空（去「土」），
+       但亮底上 #F5F0FF 亮文字的对比度会掉。这里把原来的纯极光层
+       改成「极光 + 压暗 overlay + vignette」三合一：
+         · 极光三团照旧（玻璃要糊的东西，同时给暮光添色散细节）
+         · 整体罩一层 rgba(11,6,32,.42) 压暗：把梯度拉到「亮但不刺」，
+           文字对比度回到 v38 水平以上
+         · vignette 四角再压一档：阅读区（中部）亮、边缘暗，有层次不发闷
+       自定义背景图时这层同样生效（#bgLayer 在它下面），用户图再花
+       也糊得出玻璃、压得下文字。 */
     body::before{
-      content:"";position:fixed;inset:-8%;z-index:-1;pointer-events:none;
+      content:"";position:fixed;inset:-8%;z-index:-2;pointer-events:none;
       background:
         radial-gradient(640px 440px at 16% 10%, rgba(200,150,235,.16), transparent 62%),
         radial-gradient(560px 400px at 84% 20%, rgba(124,92,246,.14), transparent 60%),
-        radial-gradient(760px 520px at 52% 112%, rgba(74,29,122,.22), transparent 60%);
+        radial-gradient(760px 520px at 52% 112%, rgba(74,29,122,.22), transparent 60%),
+        radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%),
+        linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%,
+                        rgba(11,6,32,.44) 100%);
       animation:aurora 26s var(--ease) infinite alternate;
     }
     /* 第二层细节：极淡噪点。重模糊下渐变色带（banding）会出现阶梯状条纹，
@@ -5342,6 +5522,11 @@ HTML = r"""<!DOCTYPE html>
 </style>
 </head>
 <body>
+<!-- v39 自定义背景层：JS 选图后由 applyBackground() 填多层背景
+     （vignette + 整体压暗 + 用户图，图在下压暗在上，同元素零层叠竞争）。
+     z-index:0 的普通定位元素——负 z-index 会被 body::before 伪元素吞掉，
+     详见 #bgLayer 注释里的三条实测记录。 -->
+<div id="bgLayer"></div>
 <div class="scanbeam"></div>
 
 <!-- 边框缩放热区：无边框窗口没有系统边框，边缘几像素拖不动。
@@ -5368,6 +5553,13 @@ HTML = r"""<!DOCTYPE html>
     <span class="tb-ver">PAW PRO · 键鼠自动化</span>
   </div>
   <div class="tb-right">
+    <button class="tb-btn" id="bgBtn" title="自定义背景：换一张本地图片；在配置面板里可恢复默认暮光紫" onclick="pickBackground()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <path d="M21 15l-5-5L5 21"/>
+      </svg>
+    </button>
     <button class="tb-btn" id="cfgBtn" title="配置导入 / 导出 / 方案" onclick="toggleCfg()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
@@ -5407,6 +5599,15 @@ HTML = r"""<!DOCTYPE html>
       <button class="cfg-btn" onclick="pasteClip()">从剪贴板粘贴</button>
     </div>
     <div class="cfg-hint">导入前自动备份当前配置；触发键绑定需在本地重设（设备相关）。</div>
+  </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">背景</div>
+    <input type="file" id="bgFile" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onchange="onBgFile(this)">
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="pickBackground()">选择图片</button>
+      <button class="cfg-btn" onclick="resetBackground()">恢复默认</button>
+    </div>
+    <div class="cfg-hint">默认是「暮光紫」渐变；换成自己的图片后会自动压暗保证文字可读。图片存在程序目录的 backgrounds/ 里，可拷贝分享。</div>
   </div>
   <div class="cfg-sec">
     <div class="cfg-sec-t">配置方案</div>
@@ -7084,6 +7285,8 @@ HTML = r"""<!DOCTYPE html>
     // 顺序反了的话筹码会按默认值(w)渲染，之后又被输入框的值覆盖，
     // 界面上就会出现「输入框是 ctrl+w、筹码却只有 W」的不一致
     applySettings(bs.settings);
+    // v39：自定义背景（默认=暮光紫，即 #bgLayer 关闭态）
+    applyBackground(bs.bg);
     renderKeyChips();
     // 暂停热键：Pause 优先，被占用会降级（后端已试过一串候选）
     $("hkPause").textContent = prettyPauseKey(bs.pause_key);
@@ -7264,6 +7467,57 @@ HTML = r"""<!DOCTYPE html>
     }
   }
   liquidGlassBind();
+
+  /* ---------- v39 自定义背景 ----------
+     【链路】按钮 → <input type=file> 选图 → FileReader 读成 dataURL
+     → api.save_background(dataURL)（Python 解码存盘 + 写设置）
+     → applyBackground 把图贴到 #bgLayer。
+     dataURL 直传而不是传路径：pywebview 的 JS 侧拿不到绝对路径，
+     FileReader 是唯一不依赖后端文件对话框的通路（配置导入同款模式）。 */
+  function pickBackground(){
+    const f = $("bgFile"); if(!f) return;
+    f.value = ""; f.click();
+  }
+  async function onBgFile(input){
+    const f = input.files && input.files[0];
+    input.value = "";
+    if(!f) return;
+    if(f.size > 12 * 1024 * 1024){ cfgMsg("图片太大了（>12MB），换张小一点的", true); return; }
+    try{
+      const dataUrl = await new Promise((res, rej)=>{
+        const r = new FileReader();
+        r.onload = () => res(r.result); r.onerror = () => rej(r.error);
+        r.readAsDataURL(f);
+      });
+      cfgMsg("正在保存背景…");
+      const r = await window.pywebview.api.save_background(dataUrl);
+      if(r && r.ok){ applyBackground(r.bg); cfgMsg("背景已更换"); }
+      else{ cfgMsg((r && r.msg) || "保存失败", true); }
+    }catch(e){ cfgMsg("读图失败：" + e, true); }
+  }
+  async function resetBackground(){
+    try{
+      const r = await window.pywebview.api.reset_background();
+      applyBackground(r && r.bg);
+      cfgMsg((r && r.ok) ? "已恢复默认暮光紫" : ((r && r.msg) || "恢复失败"), !(r && r.ok));
+    }catch(e){ cfgMsg("恢复出错：" + e, true); }
+  }
+  function applyBackground(bg){
+    // v39：把图填进 #bgLayer 的多层 background（vignette + 压暗 + 图）。
+    // 压暗与 vignette 和 body::before 里那套同参数——用户图再亮再花，
+    // 文字对比度有保底；且都在同一个元素上，不依赖跨元素层叠。
+    // 清空即恢复默认暮光紫（body 的渐变）。
+    const layer = $("bgLayer");
+    if(!layer) return;
+    if(bg && bg.type === "custom" && bg.url){
+      layer.style.backgroundImage =
+        "radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%)," +
+        "linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%, rgba(11,6,32,.44) 100%)," +
+        "url('" + bg.url + "')";
+    }else{
+      layer.style.backgroundImage = "";
+    }
+  }
 </script>
 </body>
 </html>"""

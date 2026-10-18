@@ -110,9 +110,9 @@ TOAST_ALPHA = 232               # 0~255
 # v38 紫水晶配色（2026-10-18）：accent 荧光紫 #8B5CF6 → 水晶紫 #9773D2（降饱和），
 # 底色 #120A24 → #16102E（亮一档去闷），文字去灰（tx-mid #9C8CC4 → #BDA9DC）。
 # toast 是 GDI 自绘做不了玻璃，与主界面「同色不同质」——颜色仍逐常量同源。
-TOAST_BG_TOP = (36, 22, 69)     # 渐变顶（微亮，模拟 rgba(217,194,240,.10) 叠层）
-TOAST_BG_BOTTOM = (22, 16, 46)  # 渐变底 #16102E = --panel
-TOAST_BORDER = (50, 34, 90)     # rgba(151,115,210,.22) on #16102E 的实色近似
+TOAST_BG_TOP = (38, 24, 74)     # 渐变顶（微亮，模拟 rgba(217,194,240,.10) 叠层）
+TOAST_BG_BOTTOM = (26, 17, 54)  # 渐变底 #1A1136 = --panel（v39 暮光亮底上压深一档）
+TOAST_BORDER = (52, 36, 94)     # rgba(151,115,210,.22) on #1A1136 的实色近似
 TOAST_TOPLINE = (91, 44, 144)   # 顶部高光线（accent-deep #5B2C90 亮部的实色近似）
 TOAST_TEXT_HI = (0xF5, 0xF0, 0xFF)   # 标题色，同 --tx-hi
 TOAST_TEXT_MID = (0xBD, 0xA9, 0xDC)  # 说明色，同 --tx-mid

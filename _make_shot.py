@@ -97,7 +97,32 @@ BOOTSTRAP = {
         "trigger": {},
     },
     "trigger": {},
+    # v39 自定义背景：默认=暮光紫（#bgLayer 关闭）。
+    # MKSHOT_BG=<图片路径> 时回读该图转 dataURL 塞进 bootstrap.bg，
+    # 截图即「用户换了自定义背景」的效果。
+    "bg": {"type": "default", "file": "", "url": ""},
 }
+
+def _mk_bg_custom():
+    """MKSHOT_BG 环境变量：把指定图片读成 dataURL，供 mock 桥与
+    bootstrap.bg 使用（截图验证自定义背景层）。"""
+    import base64, os as _os
+    p = _os.environ.get("MKSHOT_BG", "")
+    if not p or not _os.path.isfile(p):
+        return None
+    with open(p, "rb") as f:
+        blob = f.read()
+    mime = "image/png"
+    if p.lower().endswith((".jpg", ".jpeg")):
+        mime = "image/jpeg"
+    elif p.lower().endswith(".webp"):
+        mime = "image/webp"
+    return {"type": "custom", "file": _os.path.basename(p),
+            "url": "data:%s;base64,%s" % (mime, base64.b64encode(blob).decode("ascii"))}
+
+BG_CUSTOM = _mk_bg_custom()
+if BG_CUSTOM:
+    BOOTSTRAP["bg"] = BG_CUSTOM
 
 # 两段式「已就绪」态：参数装好了、等触发键，两边都没在运行
 STATUS = {
@@ -176,6 +201,11 @@ window.pywebview = {api: {
   title_resize:     async () => ({ok:true}),
   toggle_pause:     async () => ({ok:true, paused:false}),
   save_settings:    async () => ({ok:true}),
+  // v39 自定义背景：mock 两条（截图环境没有 pywebview 真桥）。
+  // bootstrap.bg 已带默认暮光；这里让「选图/恢复」也能在
+  // MKSHOT_SELFTEST 里跑通不报错。
+  save_background:  async () => ({ok:true, bg:%(bg_custom)s}),
+  reset_background: async () => ({ok:true, bg:{type:"default", file:"", url:""}}),
   list_profiles:    async () => ({ok:true, profiles:["农场方案","副本速刷"]}),
   relaunch_as_admin:async () => ({ok:false, msg:"截图环境不触发提权"}),
   // 宏录制区（v27）：mock 里也要给全套方法。
@@ -406,6 +436,8 @@ else:
 # 肉眼完全看不出来。正确写法：格式化 MOCK 本身。
 MOCK = MOCK % {
     "bootstrap": json.dumps(BOOTSTRAP, ensure_ascii=False),
+    "bg_custom": json.dumps(BG_CUSTOM or {"type": "custom", "file": "", "url": ""},
+                            ensure_ascii=False),
     "status": json.dumps(STATUS, ensure_ascii=False),
     "hotkey_text": json.dumps(HOTKEY_TEXT, ensure_ascii=False),
     "button_hotkeys": json.dumps(BUTTON_HOTKEYS, ensure_ascii=False),
