@@ -1,0 +1,12 @@
+# 行尾锁死为 LF：本项目用 md5 做双源 UI 校验（_check_diverged.py /
+# verify_toast_style / 构建闸门 [3.5/4] 全是字节级比对），
+# Windows 下 Git 默认的 CRLF 转换会让 checkout 后的文件 md5 变化，
+# 造成「源码没改却报分叉」的假象。故源码类文件一律不做行尾转换。
+*.py text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.spec text eol=lf
+*.bat text eol=crlf
