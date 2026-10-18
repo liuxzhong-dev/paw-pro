@@ -54,10 +54,17 @@
          也不动画 blur 半径（每帧重糊整个背景），只动 transform/阴影/填充。 */
       /* ---- 玻璃宝石层（v38 紫水晶：填充改四档模拟晶体内部——
            顶=受光面透亮粉紫、中=本色紫、下=根部深紫近黑；
-           saturate 降到 150% 防过艳；rim/sheen/高光一律粉紫不用白）---- */
-      --glass-fill:rgba(217,194,240,.10);
-      --glass-fill-mid:rgba(30,18,58,.62);
-      --glass-fill-low:rgba(12,6,26,.66);
+           saturate 降到 150% 防过艳；rim/sheen/高光一律粉紫不用白）----
+           v40：三档填充的 alpha 乘 --glass-a（面板透明度倍率，默认 1=v38
+           原值）。用 calc 而不是把整串色值拆进 JS：色板仍只有一处源头，
+           滑块只改一个数字。calc 在 rgba() 的 alpha 位是标准语法，
+           WebView2（Chromium 90+）支持。 */
+      /* v40：顶部受光面原来只用 10% 的粉紫（几乎透明），在暮光这种亮底上
+         上半张卡片等于没填充，标签直接糊在天空上。改成「深紫底 + 稍亮顶」，
+         明暗关系还在，但任何背景上都兜得住文字。 */
+      --glass-fill:rgba(20,12,40,calc(.74 * var(--glass-a,1)));
+      --glass-fill-mid:rgba(17,10,34,calc(.84 * var(--glass-a,1)));
+      --glass-fill-low:rgba(8,4,18,calc(.88 * var(--glass-a,1)));
       --glass-blur:18px;
       --glass-sat:150%;
       --glass-edge:rgba(195,166,236,.28);
@@ -66,6 +73,10 @@
       --glass-shadow:0 18px 44px rgba(6,2,20,.60),0 0 30px rgba(151,115,210,.10);
       --gem-hi:rgba(217,194,240,.40);
       --gem-low:rgba(20,4,48,.55);
+      /* v40 外观变量：--glass-a 面板填充倍率 / --slot-a 内槽填充倍率
+         （滑块 50~100 / 40~100 → 0.5~1.0，JS 只写这两个数字）。 */
+      --glass-a:1;
+      --slot-a:1;
       /* ---- 液态玻璃层（v37：Apple Liquid Glass 观感）----
          与 v36 霜玻璃的差别：① 圆角取代切角（clip-path 会裁掉外阴影，
          液态玻璃要的是「整块浮起」）② 受光棱从「一条顶线」升级为
@@ -79,9 +90,10 @@
       --rim-hi:rgba(217,194,240,.42);
       --rim-lo:rgba(217,194,240,.10);
       --rim-side:rgba(217,194,240,.08);
-      --slot-top:rgba(0,0,0,.24);
-      --slot-bot:rgba(217,194,240,.05);
-      --slot-edge:rgba(217,194,240,.07);
+      /* v40：内槽三件的 alpha 同样乘 --slot-a（卡片内小格子的透明度）。 */
+      --slot-top:rgba(0,0,0,calc(.24 * var(--slot-a,1)));
+      --slot-bot:rgba(217,194,240,calc(.05 * var(--slot-a,1)));
+      --slot-edge:rgba(217,194,240,calc(.07 * var(--slot-a,1)));
       --sheen:linear-gradient(122deg,rgba(217,194,240,.13) 0%,
              rgba(217,194,240,.045) 26%,transparent 52%);
       --mx:50%;--my:-20%;
@@ -94,6 +106,14 @@
       /* v39：默认背景=暮光紫天空梯度（参考栈桥图：顶深紫罗兰→中粉紫→
          天际暖粉→海面深紫蓝，全程无纯黑）。 */
       background-image:linear-gradient(180deg,
+        var(--bg-void) 0%, var(--bg-abyss) 26%, var(--bg-mid) 48%,
+        var(--bg-warm) 62%, var(--bg-sea) 88%, #241D52 100%);
+      /* 极光/压暗整层强度：暮光底本来就亮，极光再全力叠会糊成一片雾，
+         降到 0.5（暗底上本来靠它出层次，亮底上它是多余的雾）。 */
+      --bg-ov-a:.34;
+      /* v40：#bgLayer 实际绘制的背景（这一份才是运行中可换的那个）。
+         与上面同值，改配色两处一起改。 */
+      --bg-img:linear-gradient(180deg,
         var(--bg-void) 0%, var(--bg-abyss) 26%, var(--bg-mid) 48%,
         var(--bg-warm) 62%, var(--bg-sea) 88%, #241D52 100%);
       background-attachment:fixed;
@@ -123,8 +143,34 @@
        （图在下、压暗在上），不依赖任何跨元素层叠。 */
     #bgLayer{
       position:fixed;inset:0;z-index:0;pointer-events:none;
-      background-position:center;background-size:cover;
-      background-repeat:no-repeat;background-attachment:fixed;
+      /* v40：内置背景也走这个元素（见下面 body[data-bg] 的 --bg-img）。
+         【为什么不能只改 body 的 background-image】实测踩到：运行中把
+         body 背景从暮光换成墨黑，computed style 已经是墨黑的新渐变，
+         截图却和换之前**逐字节相同**（md5 一样）——画布（body 传播到
+         视口的那个背景）被首轮样式快照缓存了，和 v39「inline 改 body
+         背景不生效」是同一个坑。纸白之所以看起来变了，是浅色主题把
+         面板/输入框一起改了，不是背景真的换了。
+         所以内置背景的渐变放进 CSS 变量 --bg-img，由这个**普通定位元素**
+         消费：它在运行中改背景是可靠的（v39 自定义图已经验证过）。
+         自定义图走 JS 内联 backgroundImage，内联优先级高于这里。 */
+      /* 四层叠一起（第一层在最上）：
+         扫描线纹理 → 32px 网格（横/竖）→ 背景本体。
+         纹理原本挂在 body::before / body::after 上，但那些规则被后面
+         一段更早年代的 .rawdiag 样式重复定义了 body::before（z-index 0
+         的网格），而本元素是 z-index 0 的后续节点，会把它整个盖住。
+         与其留两套互相遮挡的装饰层，不如把纹理直接并进来：观感一致，
+         而且换背景时纹理跟着走（自定义图那一路由 JS 内联改写，
+         照片本身够花，不需要网格）。 */
+      background-image:
+        repeating-linear-gradient(0deg,
+          rgba(217,194,240,.022) 0 1px, transparent 1px 3px),
+        linear-gradient(var(--grid) 1px,transparent 1px),
+        linear-gradient(90deg,var(--grid) 1px,transparent 1px),
+        var(--bg-img,none);
+      background-size:100% 100%,32px 32px,32px 32px,cover;
+      /* 前三层是平铺纹理，最后一层背景铺满不重复 */
+      background-repeat:repeat,repeat,repeat,no-repeat;
+      background-position:center;background-attachment:fixed;
     }
 
     /* ---------- 压暗层 + 玻璃的第一层：背后必须有可糊的内容 ----------
@@ -132,26 +178,146 @@
        但亮底上 #F5F0FF 亮文字的对比度会掉。这里把原来的纯极光层
        改成「极光 + 压暗 overlay + vignette」三合一：
          · 极光三团照旧（玻璃要糊的东西，同时给暮光添色散细节）
-         · 整体罩一层 rgba(11,6,32,.42) 压暗：把梯度拉到「亮但不刺」，
-           文字对比度回到 v38 水平以上
+         · 整体罩一层压暗：把梯度拉到「亮但不刺」，文字对比度有保底
          · vignette 四角再压一档：阅读区（中部）亮、边缘暗，有层次不发闷
        自定义背景图时这层同样生效（#bgLayer 在它下面），用户图再花
-       也糊得出玻璃、压得下文字。 */
-    body::before{
-      content:"";position:fixed;inset:-8%;z-index:-2;pointer-events:none;
+       也糊得出玻璃、压得下文字。
+       【v40 为什么把数值提成变量】新增「纸白 / 墨黑」内置背景后，
+       白底上这层 .42 的压暗会把纸压成灰布，所以压暗三件套
+       （--dim-top/mid/bot/vig）和整层不透明度 --bg-ov-a 都跟主题走：
+       暮光 .30/.10/.44、纸白 .03/.02/.05 + --bg-ov-a .32、
+       墨黑 .12/.06/.20。JS 只写 body[data-bg]，CSS 决定取值。 */
+    #bgLayer::before{
+      content:"";position:absolute;inset:-8%;pointer-events:none;
+      opacity:var(--bg-ov-a,1);
       background:
         radial-gradient(640px 440px at 16% 10%, rgba(200,150,235,.16), transparent 62%),
         radial-gradient(560px 400px at 84% 20%, rgba(124,92,246,.14), transparent 60%),
         radial-gradient(760px 520px at 52% 112%, rgba(74,29,122,.22), transparent 60%),
-        radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%),
-        linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%,
-                        rgba(11,6,32,.44) 100%);
+        radial-gradient(140% 110% at 50% 45%, transparent 52%, var(--dim-vig,rgba(11,6,32,.42)) 100%),
+        linear-gradient(180deg, var(--dim-top,rgba(11,6,32,.30)) 0%,
+                        var(--dim-mid,rgba(11,6,32,.10)) 40%,
+                        var(--dim-bot,rgba(11,6,32,.44)) 100%);
       animation:aurora 26s var(--ease) infinite alternate;
     }
+    /* ---------- 内置背景主题（v40）----------
+       三套自带背景：暮光（默认，v39 栈桥采样）/ 纸白 / 墨黑。
+       只换 body 的背景图 + 压暗层参数；面板/文字/玻璃全部沿用
+       （深色玻璃浮在任何底上都成立，这是 v36~39 配方的天然优势）。
+       data-bg="custom" 时没有任何规则命中 → 回落 body 默认渐变，
+       用户的图由 #bgLayer 单独贴（见 applyBackground）。 */
+    body[data-bg="paper"]{
+      background-image:linear-gradient(180deg,#F9F6FD 0%,#ECE6F4 55%,#DDD5EC 100%);
+      --bg-img:linear-gradient(180deg,#F9F6FD 0%,#ECE6F4 55%,#DDD5EC 100%);
+      --bg-ov-a:.32;
+      --dim-top:rgba(11,6,32,.03);--dim-mid:rgba(11,6,32,.02);
+      --dim-bot:rgba(11,6,32,.05);--dim-vig:rgba(11,6,32,.05);
+    }
+    body[data-bg="ink"]{
+      background-image:linear-gradient(180deg,#07030F 0%,#100A22 55%,#07030F 100%);
+      --bg-img:linear-gradient(180deg,#07030F 0%,#100A22 55%,#07030F 100%);
+      --bg-ov-a:1;
+      --dim-top:rgba(11,6,32,.12);--dim-mid:rgba(11,6,32,.06);
+      --dim-bot:rgba(11,6,32,.20);--dim-vig:rgba(11,6,32,.30);
+    }
+
+    /* ---------- 浅色主题（v40：纸白 / 亮色自定义图）----------
+       【为什么必须有这一层】深色玻璃 + 亮文字是 v36~39 的默认语言，
+       但它只对深色底成立：纸白背景上，半透明玻璃把白底糊过来后
+       ① 面板整体变浅 ② 亮色文字（--tx-hi #F5F0FF）在浅面板上消失，
+       实测截图为「整屏发白、字段标签几乎看不见」。
+       所以浅色底要切主题，不是调压暗层——压暗能救可读性，却把纸白
+       压成灰布（白背景就没意义了）。
+       做法与成熟主题系统一致：**只换 token**（文字/玻璃/内槽/边线），
+       组件规则一条不改；另加十几条「硬编码深色面板」的定点覆盖
+       （标题栏/配置浮层/裁剪浮层/顶部状态块等，它们是 v36 起就写死的
+       深色渐变，不参与 token）。
+       触发条件：内置纸白 → 直接切；自定义图 → 取图平均亮度（JS 采样，
+       阈值 0.60），亮图自动进浅色，暗图留在深色。 */
+    html.light{
+      --tx-hi:#2A1B45;
+      --tx-mid:#54407A;
+      --tx-dim:#7B67A3;
+      /* 玻璃：白卡片浮在浅底上，靠边框+柔影定形（浅色下不靠填充对比） */
+      --glass-fill:rgba(255,255,255,calc(.62 * var(--glass-a,1)));
+      --glass-fill-mid:rgba(253,251,255,calc(.68 * var(--glass-a,1)));
+      --glass-fill-low:rgba(238,231,249,calc(.74 * var(--glass-a,1)));
+      --glass-edge:rgba(120,92,170,.20);
+      --glass-edge-lit:rgba(255,255,255,.85);
+      --glass-shadow:0 14px 34px rgba(60,32,100,.13),0 1px 2px rgba(60,32,100,.06);
+      --rim-hi:rgba(255,255,255,.95);
+      --rim-lo:rgba(120,92,170,.10);
+      --rim-side:rgba(255,255,255,.60);
+      --sheen:linear-gradient(122deg,rgba(255,255,255,.50) 0%,
+             rgba(255,255,255,.18) 26%,transparent 52%);
+      --slot-top:rgba(120,92,170,calc(.10 * var(--slot-a,1)));
+      --slot-bot:rgba(255,255,255,calc(.40 * var(--slot-a,1)));
+      --slot-edge:rgba(120,92,170,calc(.15 * var(--slot-a,1)));
+      --line:rgba(120,92,170,.18);
+      --line-soft:rgba(120,92,170,.10);
+      --glow:rgba(151,115,210,.22);
+      --glow-soft:rgba(151,115,210,.08);
+      --panel:#FFFFFF;
+      --panel-inset:#F8F5FF;
+      --glass-hi:rgba(255,255,255,.55);
+      --gem-hi:rgba(255,255,255,.70);
+      --gem-low:rgba(120,92,170,.10);
+      /* 语义色在浅底上要压深：mint #3EF0C4 / spark #FF9A3C 是为深底挑的
+         高亮色，直接搬到白底会「发光但不清楚」（实测状态字几乎看不见）。
+         语义不变，只调明度。 */
+      --accent-mint:#0E8F76;
+      --spark:#B96400;
+    }
+    /* 标题栏：深色玻璃 → 磨砂白（文字已随 token 变深） */
+    html.light .titlebar{
+      background:linear-gradient(180deg,rgba(255,255,255,.86) 0%,rgba(246,241,255,.82) 100%);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 2px 10px rgba(60,32,100,.10);
+    }
+    /* 表单控件：暗槽 → 白槽（凹陷靠内阴影，不靠黑色填充） */
+    html.light input,html.light select{
+      background:#FFFFFF;border-color:rgba(120,92,170,.22);
+      box-shadow:inset 0 1px 2px rgba(60,32,100,.09);
+    }
+    html.light input:focus,html.light select:focus{
+      background:#FFFFFF;border-color:var(--accent);
+      box-shadow:0 0 0 1px rgba(151,115,210,.30),0 0 12px rgba(151,115,210,.14);
+    }
+    html.light select option{background:#FFFFFF;color:var(--tx-hi)}
+    /* 卡片内小格（kpi/gmsg/flow/trig-cell/bg-card/bs-card）：
+       深色凹槽 → 浅紫凹槽，与白面板同一语言 */
+    html.light .kpi,html.light .gmsg,html.light .flow,
+    html.light .trig-cell,html.light .bg-card,html.light .bs-card{
+      background:linear-gradient(180deg,rgba(120,92,170,.07),rgba(255,255,255,.55));
+      box-shadow:inset 0 1px 0 rgba(120,92,170,.06),inset 0 -1px 0 rgba(255,255,255,.7);
+    }
+    html.light .ghostbtn{
+      background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(238,231,249,.75));
+      color:var(--tx-mid);
+    }
+    html.light .tag{
+      background:linear-gradient(180deg,rgba(62,240,196,.16),rgba(255,255,255,.40));
+      border-color:rgba(20,170,140,.42);color:#0E8F76;
+    }
+    /* 配置浮层 / 裁剪浮层：深色玻璃 → 亮玻璃（它们写死过深色渐变） */
+    html.light .cfg-panel{
+      background:linear-gradient(170deg,rgba(255,255,255,.90) 0%,rgba(246,241,255,.92) 100%);
+      box-shadow:0 18px 44px rgba(60,32,100,.18),inset 0 1.5px 0 rgba(255,255,255,.95);
+    }
+    html.light .crop-box{
+      background:linear-gradient(170deg,rgba(255,255,255,.97) 0%,rgba(246,241,255,.98) 100%);
+      box-shadow:0 24px 60px rgba(60,32,100,.24),inset 0 1.5px 0 rgba(255,255,255,.95);
+    }
+    html.light .crop-mask{background:rgba(40,20,70,.28)}
+    /* 「停止」按钮在浅底上粉色字太淡 → 压深一档 */
+    html.light button.stop{color:#B3122F}
+    /* 主按钮上的白字不能跟着 token 变深 */
+    html.light button.primary,html.light body[data-btn="pill"] button.primary{color:#FFFFFF}
+    html.light body[data-btn="ghost"] button.primary{color:var(--accent-deep)}
+    html.light .elevban{background:linear-gradient(90deg,rgba(255,154,60,.16),rgba(255,255,255,.5))}
     /* 第二层细节：极淡噪点。重模糊下渐变色带（banding）会出现阶梯状条纹，
        一层 opacity .05 的 feTurbulence 噪点即可打散，同时增加「材质感」。 */
-    body::after{
-      content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;
+    #bgLayer::after{
+      content:"";position:absolute;inset:0;pointer-events:none;opacity:.05;
       background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
     }
     @keyframes aurora{
@@ -459,22 +625,11 @@
     button.pulse{animation:breathe 1.4s var(--ease) infinite;
       border-color:var(--accent-mint)!important;color:var(--accent-mint)!important}
     button:disabled{opacity:.42;cursor:not-allowed}
-    /* 底层：径向渐层 + 网格平铺。
-       性能注意：网格必须用 background-size 平铺，不要堆重复 DOM。 */
-    body::before{
-      content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
-      background:
-        radial-gradient(120% 90% at 50% 0%, var(--bg-abyss) 0%, var(--bg-void) 70%),
-        linear-gradient(var(--grid) 1px,transparent 1px),
-        linear-gradient(90deg,var(--grid) 1px,transparent 1px);
-      background-size:100% 100%,32px 32px,32px 32px;
-    }
-/* 扫描线纹理 */
-  body::after{
-    content:"";position:fixed;inset:0;pointer-events:none;z-index:1;
-    background:repeating-linear-gradient(0deg,
-      rgba(217,194,240,.022) 0 1px, transparent 1px 3px);
-  }
+    /* v40：原来这里还有一套 body::before（深色径向 + 32px 网格）和
+       body::after（扫描线）。它们与 v36/v39 的极光/噪点同名互相覆盖——
+       后定义的那份（深色径向）实际盖住了暮光渐变，导致「切墨黑看不出
+       变化」（两种背景都被压成同一个深紫）。现已合并进 #bgLayer：
+       渐变 + 网格 + 扫描线在同一个元素上，极光/噪点走它的伪元素。 */
   /* 全局扫描光束：只给1 个元素跑动画，别整屏加。
      刻意压得很淡（.22 -> .12）：这道光束会从 KPI 数字上扫过去，
      太亮会把文字盖住，看起来像「文字变白了/配色错了」。 */
@@ -941,6 +1096,60 @@
       box-shadow:0 0 18px rgba(255,45,75,.4),
                  inset 0 1px 0 rgba(255,210,218,.26), inset 0 -1px 0 rgba(0,0,0,.26);
     }
+    /* ---------- 按钮样式四套（v40：主人可自定义）----------
+       分类参考成熟设计系统的按钮形态语言：宝石（gradient solid）/
+       玻璃（glass fill + blur）/ 描边（ghost）/ 胶囊（gradient pill）。
+       只作用于主按钮 button.primary；语义红 button.stop 保持红色
+       （「停止」是语义色，与皮肤解耦——v38 立的规矩，四套都守）。
+       特异性：body[data-btn] button.primary 高于 button/base 规则，
+       不用 !important。active 的公共 inset 阴影在 ghost 下要去掉
+       （ghost 无阴影，按下时冒出来一条会很违和）。 */
+    body[data-btn="glass"] button.primary{
+      background:linear-gradient(160deg,rgba(217,194,240,.24),rgba(151,115,210,.10));
+      -webkit-backdrop-filter:blur(10px) saturate(140%);
+      backdrop-filter:blur(10px) saturate(140%);
+      border-color:var(--glass-edge-lit);
+      color:var(--crystal-hi);
+      text-shadow:none;
+      box-shadow:inset 0 1px 0 rgba(217,194,240,.42),
+                 0 8px 22px rgba(6,2,20,.42);
+    }
+    body[data-btn="glass"] button.primary:hover{
+      background:linear-gradient(160deg,rgba(217,194,240,.34),rgba(151,115,210,.16));
+      box-shadow:inset 0 1px 0 rgba(217,194,240,.55),
+                 0 10px 26px rgba(6,2,20,.5);
+    }
+    body[data-btn="ghost"] button.primary{
+      background:transparent;
+      border-color:rgba(151,115,210,.55);
+      color:var(--crystal-lift);
+      text-shadow:none;
+      box-shadow:none;
+    }
+    body[data-btn="ghost"] button.primary:hover{
+      background:rgba(151,115,210,.13);
+      border-color:var(--crystal-lift);
+      color:var(--tx-hi);
+      box-shadow:0 0 16px rgba(151,115,210,.22);
+    }
+    body[data-btn="ghost"] button.primary:active{
+      box-shadow:none;
+    }
+    body[data-btn="pill"] button.primary{
+      border-radius:999px;
+      background:linear-gradient(90deg,var(--accent-ultra) 0%,var(--accent-deep) 30%,
+                                 var(--accent) 65%,var(--crystal-lift) 100%);
+      border-color:rgba(217,194,240,.5);
+      color:#FFFFFF;
+      text-shadow:0 1px 2px rgba(20,4,48,.5);
+      box-shadow:0 6px 22px rgba(151,115,210,.5),
+                 inset 0 1px 0 rgba(217,194,240,.4);
+    }
+    body[data-btn="pill"] button.primary:hover{
+      box-shadow:0 8px 30px rgba(151,115,210,.7),
+                 inset 0 1px 0 rgba(217,194,240,.55);
+    }
+    body[data-btn="pill"] button.stop{border-radius:999px}
 
     /* ---------- 状态条 ---------- */
     .status{
@@ -989,7 +1198,7 @@
     @media (prefers-reduced-motion:reduce){ *{animation:none!important} }
     /* 系统级「减少透明」：玻璃是装饰，可读性永远优先（退回近实色面板） */
     @media (prefers-reduced-transparency:reduce){
-      body::before,body::after{display:none}
+      #bgLayer::before,#bgLayer::after{display:none}
       .panel,.cfg-panel{background:linear-gradient(160deg,var(--panel-inset) 0%,var(--panel) 100%)}
       .panel,.cfg-panel,.titlebar{-webkit-backdrop-filter:none;backdrop-filter:none}
       .panel::after{display:none}
@@ -1008,8 +1217,18 @@
     border:1px solid var(--glass-edge); border-radius:var(--radius-liquid); padding:12px;
     box-shadow:0 18px 50px rgba(2,0,10,.6), inset 0 1.5px 0 var(--rim-hi),
                inset 0 -1px 0 var(--rim-lo);
+    /* v40：背景/质感/按钮样式三节进来后面板比窗口高了。加内部滚动
+       （max-height + overflow-y），否则下面的「配置方案」在矮窗口里
+       不可达——而全局把 ::-webkit-scrollbar 的 width 设成 0（v31 为
+       右侧缩放热区让路）会让溢出部分连滚轮提示都没有，用户根本不知道
+       能滚。面板是 fixed 浮层、贴着 right:10px，给它一条自己的细滚动条
+       不影响窗口边缘热区。注意：这段注释里不要写花括号，静态断言是按
+       「选择器到第一个右花括号」截段落做检查的。 */
+    max-height:calc(100vh - 46px); overflow-y:auto; overscroll-behavior:contain;
     display:none; }
   .cfg-panel.open{ display:block; }
+  .cfg-panel::-webkit-scrollbar{width:6px}
+  .cfg-panel::-webkit-scrollbar-thumb{background:rgba(151,115,210,.35);border-radius:3px}
   .cfg-sec{ margin-bottom:12px; }
   .cfg-sec:last-of-type{ margin-bottom:0; }
   .cfg-sec-t{ font-size:11px; letter-spacing:1px; color:var(--accent-mint);
@@ -1028,6 +1247,103 @@
   .cfg-hint{ font-size:10.5px; line-height:1.5; color:var(--tx-dim); margin-top:6px; }
   .cfg-msg{ font-size:11px; margin-top:4px; min-height:14px; color:var(--accent-mint); }
   .cfg-msg.err{ color:#ff9a9a; }
+
+  /* ---------- v40 外观：背景卡片 / 滑块 / 按钮样式卡 ----------
+     设计对标成熟方案（dsh ui-background 插件的预设卡片模式 +
+     Windows 11 个性化的主题卡）：缩略图与主背景同源（同一串 CSS
+     渐变），所见即所得；选中态紫边 + 柔光。 */
+  .bg-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:7px}
+  .bg-card{flex:none;min-width:0;height:auto;padding:0;cursor:pointer;
+    border:1px solid var(--slot-edge);border-radius:8px;overflow:hidden;
+    background:rgba(0,0,0,.2);display:flex;flex-direction:column;
+    letter-spacing:0;text-transform:none;font-weight:500;
+    transition:border-color var(--t-fast) var(--ease),
+               box-shadow var(--t-fast) var(--ease)}
+  .bg-card .bg-thumb{height:38px;width:100%;display:block}
+  .bg-card .bg-name{font-size:10.5px;color:var(--tx-mid);padding:4px 2px 5px;line-height:1}
+  .bg-card:hover{border-color:rgba(151,115,210,.45)}
+  .bg-card.sel{border-color:var(--accent);box-shadow:0 0 10px rgba(151,115,210,.35)}
+  .bg-card.sel .bg-name{color:var(--tx-hi)}
+  .bg-thumb-twilight{background:linear-gradient(180deg,#2B1F4E,#4A3578 26%,#7B5AA6 48%,#C08BB8 62%,#3E3170 88%,#241D52)}
+  .bg-thumb-paper{background:linear-gradient(180deg,#F9F6FD,#ECE6F4 55%,#DDD5EC)}
+  .bg-thumb-ink{background:linear-gradient(180deg,#07030F,#100A22 55%,#07030F)}
+  /* 滑块行：标签 + range + 数值 */
+  .slider-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;
+    font-size:11.5px;color:var(--tx-mid)}
+  .slider-row>span{flex:none;width:34px}
+  .slider-row input[type=range]{flex:1;min-width:0;height:18px;
+    accent-color:var(--accent);cursor:pointer}
+  .slider-row b{flex:none;width:38px;text-align:right;color:var(--tx-hi);
+    font-weight:600;font-size:11px}
+  /* 按钮样式卡：四张横排，demo 块 preview 形态语言 */
+  .bs-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .bs-card{flex:none;min-width:0;height:auto;padding:6px 2px 5px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:5px;
+    border:1px solid var(--slot-edge);border-radius:8px;background:rgba(0,0,0,.16);
+    letter-spacing:0;text-transform:none;font-weight:500;font-size:10.5px;
+    color:var(--tx-mid);
+    transition:border-color var(--t-fast) var(--ease),
+               box-shadow var(--t-fast) var(--ease)}
+  .bs-card:hover{border-color:rgba(151,115,210,.45);color:var(--tx-hi)}
+  .bs-card.sel{border-color:var(--accent);
+    box-shadow:0 0 10px rgba(151,115,210,.35);color:var(--tx-hi)}
+  .bs-demo{width:44px;height:16px;border-radius:5px;display:block;
+    border:1px solid rgba(151,115,210,.4)}
+  .bs-demo.gem{background:linear-gradient(180deg,#D9C2F0,#9773D2 46%,#5B2C90 78%,#2E0F5C);
+    border-color:rgba(217,194,240,.55)}
+  .bs-demo.glass{background:linear-gradient(160deg,rgba(217,194,240,.24),rgba(151,115,210,.10));
+    border-color:rgba(217,194,240,.45)}
+  .bs-demo.ghost{background:transparent;border-color:rgba(151,115,210,.55)}
+  .bs-demo.pill{border-radius:999px;
+    background:linear-gradient(90deg,#2E0F5C,#5B2C90 30%,#9773D2 65%,#C3A6EC)}
+
+  /* ---------- 裁剪对话框（v40）----------
+     复用宏编辑 modal 的玻璃语言（大圆角 + rim + 多层阴影）。
+     stage = 「窗口预览框」：框里排的构图就是上背景后的效果
+     （所见即所得），点应用才 canvas 导出落盘。交互参考 Cropper.js
+     的核心子集：拖动平移 + 缩放 + 宽高比 + 导出（旋转/翻转不做——
+     背景图用不上，少一个按钮少一分误触）。 */
+  .crop-modal{position:fixed;inset:0;z-index:60;display:none;
+    align-items:center;justify-content:center;padding:24px}
+  .crop-modal.open{display:flex}
+  .crop-mask{position:absolute;inset:0;background:rgba(4,2,12,.66)}
+  .crop-box{position:relative;width:min(600px,94vw);max-height:92vh;overflow:auto;
+    background:linear-gradient(170deg, rgba(48,28,88,.96) 0%, rgba(16,8,32,.97) 100%);
+    border:1px solid var(--glass-edge-lit);border-radius:var(--radius-liquid);
+    box-shadow:0 24px 60px rgba(2,0,10,.7), inset 0 1.5px 0 var(--rim-hi);
+    padding:14px 16px}
+  .crop-box::-webkit-scrollbar{width:6px}
+  .crop-box::-webkit-scrollbar-thumb{background:rgba(151,115,210,.35);border-radius:3px}
+  .crop-title{display:flex;align-items:center;font-size:13px;font-weight:600;
+    color:var(--tx-hi);margin-bottom:10px}
+  .crop-title .mc-x{margin-left:auto}
+  .crop-body{display:flex;gap:14px;flex-wrap:wrap}
+  .crop-stage-wrap{flex:1;min-width:250px}
+  .crop-stage{position:relative;width:100%;aspect-ratio:16/10;overflow:hidden;
+    cursor:grab;background:rgba(0,0,0,.35);
+    border:1px solid var(--slot-edge);border-radius:10px;
+    box-shadow:inset 0 1px 0 var(--slot-top);touch-action:none}
+  .crop-stage.dragging{cursor:grabbing}
+  .crop-stage img{position:absolute;left:50%;top:50%;transform-origin:center;
+    max-width:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+  /* 三分构图线：帮用户把地平线/主体放到黄金位 */
+  .crop-stage .crop-guide{position:absolute;inset:0;pointer-events:none;
+    background:
+      linear-gradient(90deg,transparent 33.2%,rgba(217,194,240,.22) 33.3%,
+        transparent 33.4%,transparent 66.5%,rgba(217,194,240,.22) 66.6%,
+        transparent 66.7%),
+      linear-gradient(180deg,transparent 33.2%,rgba(217,194,240,.22) 33.3%,
+        transparent 33.4%,transparent 66.5%,rgba(217,194,240,.22) 66.6%,
+        transparent 66.7%)}
+  .crop-side{flex:none;width:176px;display:flex;flex-direction:column;gap:9px}
+  .crop-side label{font-size:11px;color:var(--tx-mid);
+    display:flex;flex-direction:column;gap:3px}
+  .crop-side input[type=range]{height:18px;accent-color:var(--accent);cursor:pointer}
+  .crop-side select{padding:5px;font-size:11.5px;color:var(--tx-hi);
+    background:var(--bg-abyss);border:1px solid var(--line);border-radius:6px}
+  .crop-btns{display:flex;gap:8px;margin-top:auto}
+  .crop-btns .cfg-btn{flex:1}
+  .crop-btns .primary{flex:1.4;min-width:0}
 </style>
 </head>
 <body>
@@ -1062,7 +1378,7 @@
     <span class="tb-ver">PAW PRO · 键鼠自动化</span>
   </div>
   <div class="tb-right">
-    <button class="tb-btn" id="bgBtn" title="自定义背景：换一张本地图片；在配置面板里可恢复默认暮光紫" onclick="pickBackground()">
+    <button class="tb-btn" id="bgBtn" title="外观：背景 / 裁剪 / 面板透明度 / 按钮样式" onclick="openAppearance()">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2"/>
         <circle cx="8.5" cy="8.5" r="1.5"/>
@@ -1111,12 +1427,52 @@
   </div>
   <div class="cfg-sec">
     <div class="cfg-sec-t">背景</div>
-    <input type="file" id="bgFile" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" onchange="onBgFile(this)">
+    <div class="bg-grid" id="bgGrid">
+      <button class="bg-card sel" data-bgcard="twilight" title="默认背景：栈桥暮光配色的紫色天空渐变（v39 定稿）" onclick="setBuiltinBg('twilight')">
+        <span class="bg-thumb bg-thumb-twilight"></span>
+        <span class="bg-name">暮光·栈桥</span>
+      </button>
+      <button class="bg-card" data-bgcard="paper" title="纸白背景：白天 / 光线强的环境更清爽" onclick="setBuiltinBg('paper')">
+        <span class="bg-thumb bg-thumb-paper"></span>
+        <span class="bg-name">纸白</span>
+      </button>
+      <button class="bg-card" data-bgcard="ink" title="墨黑背景：纯黑夜景，专注省电" onclick="setBuiltinBg('ink')">
+        <span class="bg-thumb bg-thumb-ink"></span>
+        <span class="bg-name">墨黑</span>
+      </button>
+    </div>
+    <input type="file" id="bgFile" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="onBgFile(this)">
     <div class="cfg-row">
-      <button class="cfg-btn" onclick="pickBackground()">选择图片</button>
+      <button class="cfg-btn" onclick="pickBackground()">选择图片…</button>
       <button class="cfg-btn" onclick="resetBackground()">恢复默认</button>
     </div>
-    <div class="cfg-hint">默认是「暮光紫」渐变；换成自己的图片后会自动压暗保证文字可读。图片存在程序目录的 backgrounds/ 里，可拷贝分享。</div>
+    <div class="cfg-hint">选自己的图片后可拖动裁剪、调缩放（框内构图即最终效果）；图片存在程序目录的 backgrounds/ 里，重启后保持。</div>
+  </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">质感 · 透明度</div>
+    <div class="slider-row"><span>面板</span>
+      <input type="range" id="glassPanel" min="50" max="100" step="1" value="100" oninput="onGlassInput('panel',this.value)">
+      <b id="glassPanelV">100%</b></div>
+    <div class="slider-row"><span>内槽</span>
+      <input type="range" id="glassSlot" min="40" max="100" step="1" value="100" oninput="onGlassInput('slot',this.value)">
+      <b id="glassSlotV">100%</b></div>
+    <div class="cfg-row">
+      <button class="cfg-btn" onclick="glassPreset('clear')">通透</button>
+      <button class="cfg-btn" onclick="glassPreset('balanced')">均衡</button>
+      <button class="cfg-btn" onclick="glassPreset('heavy')">厚重</button>
+      <button class="cfg-btn" onclick="glassPreset('default')">默认</button>
+    </div>
+    <div class="cfg-hint">调低更透（背景更清晰），调高更实（内容更聚焦）。改动即时生效并自动保存，重启不丢。</div>
+  </div>
+  <div class="cfg-sec">
+    <div class="cfg-sec-t">按钮样式</div>
+    <div class="bs-grid">
+      <button class="bs-card sel" data-bscard="gem" title="宝石：紫水晶渐变主按钮（默认）" onclick="onBtnStyle('gem')"><span class="bs-demo gem"></span>宝石</button>
+      <button class="bs-card" data-bscard="glass" title="玻璃：半透明磨砂 + 背光" onclick="onBtnStyle('glass')"><span class="bs-demo glass"></span>玻璃</button>
+      <button class="bs-card" data-bscard="ghost" title="描边：透明底紫腰线" onclick="onBtnStyle('ghost')"><span class="bs-demo ghost"></span>描边</button>
+      <button class="bs-card" data-bscard="pill" title="胶囊：横向渐变全圆角" onclick="onBtnStyle('pill')"><span class="bs-demo pill"></span>胶囊</button>
+    </div>
+    <div class="cfg-hint">作用于各区的「① 就绪」主按钮；停止键恒为红色（语义色不随风格变）。</div>
   </div>
   <div class="cfg-sec">
     <div class="cfg-sec-t">配置方案</div>
@@ -1130,6 +1486,43 @@
     <div class="cfg-hint">方案保存在程序目录的 profiles/ 文件夹，可跨机器拷贝分享。</div>
   </div>
   <div class="cfg-msg" id="cfgMsg"></div>
+</div>
+
+<!-- v40 裁剪对话框：选图后在此拖动 / 缩放 / 选比例，stage 框内的构图
+     就是上背景后的效果（所见即所得），点「应用」才 canvas 导出落盘。 -->
+<div class="crop-modal" id="cropModal">
+  <div class="crop-mask" onclick="cropCancel()"></div>
+  <div class="crop-box">
+    <div class="crop-title">裁剪背景
+      <button class="mc-x" onclick="cropCancel()" title="取消">✕</button>
+    </div>
+    <div class="crop-body">
+      <div class="crop-stage-wrap">
+        <div class="crop-stage" id="cropStage">
+          <img id="cropImg" alt="">
+          <div class="crop-guide"></div>
+        </div>
+      </div>
+      <div class="crop-side">
+        <label>缩放
+          <input type="range" id="cropZoom" min="100" max="300" step="1" value="100">
+        </label>
+        <label>比例
+          <select id="cropRatio">
+            <option value="1.6">16:10 窗口</option>
+            <option value="1.7778">16:9 宽屏</option>
+            <option value="1.3333">4:3</option>
+            <option value="1">1:1 方形</option>
+          </select>
+        </label>
+        <div class="crop-btns">
+          <button class="cfg-btn" onclick="cropCancel()">取消</button>
+          <button class="primary" onclick="cropApply()">应用</button>
+        </div>
+        <div class="cfg-hint">拖动图片调位置；滚轮或滑块缩放。</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="wrap">
@@ -2567,6 +2960,9 @@
     if(k.hz != null)        $("kHz").value   = k.hz;
     if(k.hold)             $("kMode").value = k.hold;
     if(k.gap != null)       $("kGap").value  = k.gap;
+    // v40 外观：玻璃透明度 + 按钮样式（导入配置后同样要跟上）
+    if(s.glass) applyGlass(s.glass);
+    if(s.btnstyle) setBtnStyle(s.btnstyle);
   }
 
   // 键盘区与鼠标区同一套两段式（见 startMouse 的注释）：
@@ -2794,7 +3190,13 @@
     // 顺序反了的话筹码会按默认值(w)渲染，之后又被输入框的值覆盖，
     // 界面上就会出现「输入框是 ctrl+w、筹码却只有 W」的不一致
     applySettings(bs.settings);
-    // v39：自定义背景（默认=暮光紫，即 #bgLayer 关闭态）
+    // v40 外观：glass/btnstyle 与 bg 一样是 bootstrap 顶层键（不在
+    // settings 快照里，save_settings 不收它们）。漏掉这两行会表现为
+    // 「改了透明度和按钮样式，重启又回默认」——正是主人这次要根治的病。
+    if(bs.glass)    applyGlass(bs.glass);
+    if(bs.btnstyle) setBtnStyle(bs.btnstyle);
+    // v40：自定义背景（默认=暮光·栈桥，即 #bgLayer 关闭态）
+    CUR_BG = bs.bg || CUR_BG;
     applyBackground(bs.bg);
     renderKeyChips();
     // 暂停热键：Pause 优先，被占用会降级（后端已试过一串候选）
@@ -2977,12 +3379,27 @@
   }
   liquidGlassBind();
 
-  /* ---------- v39 自定义背景 ----------
-     【链路】按钮 → <input type=file> 选图 → FileReader 读成 dataURL
-     → api.save_background(dataURL)（Python 解码存盘 + 写设置）
-     → applyBackground 把图贴到 #bgLayer。
-     dataURL 直传而不是传路径：pywebview 的 JS 侧拿不到绝对路径，
-     FileReader 是唯一不依赖后端文件对话框的通路（配置导入同款模式）。 */
+  /* ---------- v40 外观：背景 / 裁剪 / 玻璃透明度 / 按钮样式 ----------
+     【持久化总原则】四个外观键全部「改动即落盘」，不走表单快照——
+     save_settings 只收 mouse/key/hide，外观键搭它的车会被静默丢弃
+     （v35 trigger 被自动保存擦掉，同款事故）：
+       · 内置背景   → api.set_background（后端规整 + 原子写盘）
+       · 自定义图片 → api.save_background（裁剪后 dataURL，后端解码存盘）
+       · 玻璃/按钮  → api.save_appearance（去抖 400ms）
+     重启时 bootstrap.settings 回读，pywebviewready → applySettings 一次到位。
+     dataURL 直传而不是传路径：pywebview 的 JS 侧拿不到选中文件的绝对
+     路径，FileReader 是唯一不依赖后端文件对话框的通路（配置导入同款）。 */
+  // 当前生效的背景条目（裁剪取消时恢复它）
+  let CUR_BG = {type:"builtin", id:"twilight", file:"", url:""};
+
+  // 标题栏图片按钮：打开配置面板并把背景节带进视野（入口与具体动作分离，
+  // 参考 Windows 11「个性化」的形态：一个总入口，里面分组管所有外观）
+  function openAppearance(){
+    const p = $("cfgPanel"); if(!p) return;
+    if(!p.classList.contains("open")) p.classList.add("open");
+    refreshProfiles();
+    const g = $("bgGrid"); if(g) g.scrollIntoView({block:"nearest"});
+  }
   function pickBackground(){
     const f = $("bgFile"); if(!f) return;
     f.value = ""; f.click();
@@ -2998,34 +3415,275 @@
         r.onload = () => res(r.result); r.onerror = () => rej(r.error);
         r.readAsDataURL(f);
       });
-      cfgMsg("正在保存背景…");
-      const r = await window.pywebview.api.save_background(dataUrl);
-      if(r && r.ok){ applyBackground(r.bg); cfgMsg("背景已更换"); }
-      else{ cfgMsg((r && r.msg) || "保存失败", true); }
+      cropOpen(dataUrl);
     }catch(e){ cfgMsg("读图失败：" + e, true); }
   }
   async function resetBackground(){
     try{
       const r = await window.pywebview.api.reset_background();
-      applyBackground(r && r.bg);
-      cfgMsg((r && r.ok) ? "已恢复默认暮光紫" : ((r && r.msg) || "恢复失败"), !(r && r.ok));
+      if(r && r.ok){ CUR_BG = r.bg; applyBackground(r.bg); cfgMsg("已恢复默认暮光"); }
+      else cfgMsg((r && r.msg) || "恢复失败", true);
     }catch(e){ cfgMsg("恢复出错：" + e, true); }
   }
-  function applyBackground(bg){
-    // v39：把图填进 #bgLayer 的多层 background（vignette + 压暗 + 图）。
-    // 压暗与 vignette 和 body::before 里那套同参数——用户图再亮再花，
-    // 文字对比度有保底；且都在同一个元素上，不依赖跨元素层叠。
-    // 清空即恢复默认暮光紫（body 的渐变）。
+  async function setBuiltinBg(id){
+    try{
+      const r = await window.pywebview.api.set_background({type:"builtin", id:id});
+      if(r && r.ok){
+        CUR_BG = r.bg; applyBackground(r.bg);
+        cfgMsg({twilight:"已切换：暮光·栈桥", paper:"已切换：纸白",
+                ink:"已切换：墨黑"}[id] || "背景已切换");
+      }else cfgMsg((r && r.msg) || "切换失败", true);
+    }catch(e){ cfgMsg("切换出错：" + e, true); }
+  }
+  function bgCardSel(id){
+    const cards = document.querySelectorAll("[data-bgcard]");
+    for(const c of cards){
+      c.classList.toggle("sel", c.getAttribute("data-bgcard") === id);
+    }
+  }
+  /* 浅色主题切换：内置纸白直接切；自定义图按平均亮度自动判定。
+     亮度算法是 sRGB 加权（0.2126/0.7152/0.0722，人眼对绿最敏感），
+     24×24 缩略采样即可——只判「整体是亮底还是暗底」，不需要精度。
+     阈值 0.60：白墙、雪景、浅色壁纸都进浅色；深色壁纸、夜景留在深色。
+     失败一律按深色（深色是默认语言，误判代价更小）。 */
+  function imageIsLight(url){
+    return new Promise((res)=>{
+      const img = new Image();
+      img.onload = () => {
+        try{
+          const c = document.createElement("canvas");
+          c.width = 24; c.height = 24;
+          const g = c.getContext("2d");
+          g.drawImage(img, 0, 0, 24, 24);
+          const d = g.getImageData(0, 0, 24, 24).data;
+          let sum = 0;
+          for(let i = 0; i < d.length; i += 4)
+            sum += 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+          res((sum / (d.length / 4)) / 255 > 0.60);
+        }catch(e){ res(false); }
+      };
+      img.onerror = () => res(false);
+      img.src = url;
+    });
+  }
+  function applyTheme(light){
+    document.documentElement.classList.toggle("light", !!light);
+  }
+  async function applyBackground(bg){
+    // v40：builtin（暮光/纸白/墨黑）由 body[data-bg] 渲染——压暗层参数
+    // 随主题走（白底不会被压成灰布，见 CSS 里 body[data-bg] 段）；
+    // custom 时 data-bg="custom" 无规则命中 → 回落 body 默认渐变，
+    // 用户的图贴到 #bgLayer。
+    // #bgLayer 维持 v39 实测结论：z-index:0 普通定位元素 + 同元素多层
+    // 背景（图在下、压暗在上）。负 z-index 会被 body::before 吞、inline
+    // 改 body 背景会被画布快照缓存——两条都调试死过，别再回退。
+    // 压暗色随亮度反相：亮图盖白纱（配浅色主题深色字），暗图盖黑纱
+    // （配深色主题亮色字）——「压暗层」在浅色下变成「提亮层」，
+    // 保证任何用户图上的文字都有对比度。
     const layer = $("bgLayer");
     if(!layer) return;
     if(bg && bg.type === "custom" && bg.url){
-      layer.style.backgroundImage =
-        "radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%)," +
-        "linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%, rgba(11,6,32,.44) 100%)," +
-        "url('" + bg.url + "')";
-    }else{
+      const light = await imageIsLight(bg.url);
+      applyTheme(light);
+      document.body.dataset.bg = "custom";
+      layer.style.backgroundImage = (light
+        ? "radial-gradient(140% 110% at 50% 45%,rgba(255,255,255,.12) 40%,rgba(250,246,255,.58) 100%)," +
+          "linear-gradient(180deg,rgba(255,255,255,.46) 0%,rgba(255,255,255,.30) 40%,rgba(250,246,255,.56) 100%),"
+        : "radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%)," +
+          "linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%, rgba(11,6,32,.44) 100%),")
+        + "url('" + bg.url + "')";
+      bgCardSel("");
+    }else if(bg && bg.type === "builtin"){
+      const id = bg.id || "twilight";
+      applyTheme(id === "paper");
+      document.body.dataset.bg = id;
       layer.style.backgroundImage = "";
+      bgCardSel(id);
+    }else{
+      applyTheme(false);
+      document.body.dataset.bg = "twilight";
+      layer.style.backgroundImage = "";
+      bgCardSel("twilight");
     }
+  }
+  // 裁剪期间背后贴原图（氛围预览；精确构图看 stage 框，所见即所得）
+  function applyBgPreview(url){
+    const layer = $("bgLayer");
+    if(!layer) return;
+    layer.style.backgroundImage =
+      "radial-gradient(140% 110% at 50% 45%, transparent 52%, rgba(11,6,32,.42) 100%)," +
+      "linear-gradient(180deg, rgba(11,6,32,.30) 0%, rgba(11,6,32,.10) 40%, rgba(11,6,32,.44) 100%)," +
+      "url('" + url + "')";
+  }
+
+  /* ---------- 裁剪器（v40，Cropper.js 核心子集）----------
+     交互模型对标 Cropper.js，只保留背景裁剪用得上的：拖动平移 +
+     缩放（滑块/滚轮）+ 宽高比 + 三分构图线 + canvas 导出；旋转/翻转
+     不做（背景图用不上，少一个按钮少一分误触）。
+     数学：stage（窗口预览框，固定比例）里一张按 cover 铺好的图，
+     transform = translate(dx,dy) scale(s)。导出时把「stage 看到的
+     区域」换算回源图像素坐标，canvas 按 dpr 重绘。 */
+  const crop = { url:"", natW:0, natH:0, s:1, dx:0, dy:0,
+                 ratio:1.6, dispW:0, dispH:0 };
+  function cropOpen(url){
+    crop.url = url; crop.s = 1; crop.dx = 0; crop.dy = 0;
+    crop.ratio = parseFloat($("cropRatio").value) || 1.6;
+    const img = $("cropImg");
+    img.onload = () => {
+      crop.natW = img.naturalWidth; crop.natH = img.naturalHeight;
+      cropLayout(); cropRender();
+      $("cropModal").classList.add("open");
+      $("cropZoom").value = "100";
+      applyBgPreview(url);   // 背后试穿
+    };
+    img.onerror = () => cfgMsg("图片解码失败，换一张试试", true);
+    img.src = url;
+  }
+  function cropLayout(){
+    // stage 宽固定（布局宽），高按比例走 → 算图的 cover 显示尺寸
+    const st = $("cropStage");
+    st.style.aspectRatio = String(crop.ratio);
+    const W = st.clientWidth, H = st.clientHeight;
+    if(!W || !H || !crop.natW) return;
+    crop.dispW = Math.max(W, H * crop.natW / crop.natH);
+    crop.dispH = crop.dispW * crop.natH / crop.natW;
+    const img = $("cropImg");
+    img.style.width = crop.dispW + "px";
+    img.style.height = crop.dispH + "px";
+  }
+  function cropClamp(){
+    // 平移限制：图的边缘不许露出 stage（和 Cropper 的 viewMode:1 同效）
+    const st = $("cropStage");
+    const W = st.clientWidth, H = st.clientHeight;
+    const mx = Math.max(0, (crop.dispW * crop.s - W) / 2);
+    const my = Math.max(0, (crop.dispH * crop.s - H) / 2);
+    crop.dx = Math.max(-mx, Math.min(mx, crop.dx));
+    crop.dy = Math.max(-my, Math.min(my, crop.dy));
+  }
+  function cropRender(){
+    const img = $("cropImg");
+    img.style.transform = "translate(-50%,-50%) translate(" +
+      crop.dx + "px," + crop.dy + "px) scale(" + crop.s + ")";
+    $("cropZoom").value = String(Math.round(crop.s * 100));
+  }
+  function cropZoomTo(v){
+    crop.s = Math.max(1, Math.min(3, v));
+    cropClamp(); cropRender();
+  }
+  function cropCancel(){
+    $("cropModal").classList.remove("open");
+    applyBackground(CUR_BG);   // 恢复正式背景（试穿作废）
+  }
+  async function cropApply(){
+    const st = $("cropStage");
+    const W = st.clientWidth, H = st.clientHeight;
+    if(!W || !H || !crop.natW){ cropCancel(); return; }
+    // stage 看到的区域 → 源图像素坐标（显示坐标 / s）
+    const viewW = crop.dispW * crop.s, viewH = crop.dispH * crop.s;
+    let sx = (W / 2 - viewW / 2 + crop.dx) / crop.s;
+    let sy = (H / 2 - viewH / 2 + crop.dy) / crop.s;
+    const sw = W / crop.s, sh = H / crop.s;
+    // 钳制防越界（浮点误差可能让 sx+sw 差 1px 出界）
+    sx = Math.max(0, Math.min(crop.natW - sw, sx));
+    sy = Math.max(0, Math.min(crop.natH - sh, sy));
+    if(sw <= 0 || sh <= 0 || sx + sw > crop.natW + 1 || sy + sh > crop.natH + 1){
+      cfgMsg("裁剪区域异常，请重试", true); return;
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext("2d");
+    ctx.drawImage($("cropImg"), sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+    let dataUrl;
+    try{ dataUrl = cv.toDataURL("image/jpeg", 0.85); }
+    catch(e){ cfgMsg("导出失败：" + e, true); return; }
+    try{
+      cfgMsg("正在保存背景…");
+      const r = await window.pywebview.api.save_background(dataUrl);
+      if(r && r.ok){
+        CUR_BG = r.bg; applyBackground(r.bg);
+        $("cropModal").classList.remove("open");
+        cfgMsg("背景已更换（已裁剪）");
+      }else cfgMsg((r && r.msg) || "保存失败", true);
+    }catch(e){ cfgMsg("保存出错：" + e, true); }
+  }
+  (function cropBind(){
+    const st = $("cropStage"); if(!st) return;
+    let drag = null;
+    st.addEventListener("pointerdown", (e)=>{
+      drag = {x:e.clientX, y:e.clientY, dx:crop.dx, dy:crop.dy};
+      st.classList.add("dragging");
+      st.setPointerCapture(e.pointerId);
+    });
+    st.addEventListener("pointermove", (e)=>{
+      if(!drag) return;
+      crop.dx = drag.dx + (e.clientX - drag.x);
+      crop.dy = drag.dy + (e.clientY - drag.y);
+      cropClamp(); cropRender();
+    });
+    const end = ()=>{ drag = null; st.classList.remove("dragging"); };
+    st.addEventListener("pointerup", end);
+    st.addEventListener("pointercancel", end);
+    st.addEventListener("wheel", (e)=>{
+      e.preventDefault();
+      cropZoomTo(crop.s + (e.deltaY < 0 ? .06 : -.06));
+    }, {passive:false});
+    $("cropZoom").addEventListener("input", function(){
+      cropZoomTo(parseFloat(this.value) / 100);
+    });
+    $("cropRatio").addEventListener("change", function(){
+      crop.ratio = parseFloat(this.value) || 1.6;
+      cropLayout(); cropRender();
+    });
+  })();
+
+  /* ---------- 玻璃透明度（v40）----------
+     滑块只写两个 CSS 数字（--glass-a / --slot-a），填充色板的 alpha
+     在 CSS 里 calc 乘它——色板仍只有 :root 一处源头，不会双源分叉。 */
+  const GLASS_PRESETS = { clear:[70,60], balanced:[85,80],
+                          heavy:[100,100], default:[100,100] };
+  function applyGlass(g){
+    const panel = (g && g.panel != null) ? g.panel : 1;
+    const slot = (g && g.slot != null) ? g.slot : 1;
+    document.documentElement.style.setProperty("--glass-a", String(panel));
+    document.documentElement.style.setProperty("--slot-a", String(slot));
+    $("glassPanel").value = String(Math.round(panel * 100));
+    $("glassSlot").value = String(Math.round(slot * 100));
+    $("glassPanelV").textContent = Math.round(panel * 100) + "%";
+    $("glassSlotV").textContent = Math.round(slot * 100) + "%";
+  }
+  let glassTimer = null;
+  function onGlassInput(which, val){
+    const cur = { panel: parseFloat($("glassPanel").value) / 100,
+                  slot: parseFloat($("glassSlot").value) / 100 };
+    applyGlass(cur);
+    clearTimeout(glassTimer);
+    glassTimer = setTimeout(()=>{
+      try{ window.pywebview.api.save_appearance({glass: cur}); }catch(e){}
+    }, 400);
+  }
+  async function glassPreset(name){
+    const p = GLASS_PRESETS[name]; if(!p) return;
+    const g = {panel: p[0] / 100, slot: p[1] / 100};
+    applyGlass(g);
+    try{ await window.pywebview.api.save_appearance({glass: g}); }catch(e){}
+  }
+
+  /* ---------- 按钮样式（v40）---------- */
+  function setBtnStyle(s){
+    document.body.dataset.btn = s || "gem";
+    const cards = document.querySelectorAll("[data-bscard]");
+    for(const c of cards){
+      c.classList.toggle("sel", c.getAttribute("data-bscard") === (s || "gem"));
+    }
+  }
+  let bsTimer = null;
+  async function onBtnStyle(s){
+    setBtnStyle(s);
+    clearTimeout(bsTimer);
+    bsTimer = setTimeout(()=>{
+      try{ window.pywebview.api.save_appearance({btnstyle: s}); }catch(e){}
+    }, 200);
   }
 </script>
 </body>

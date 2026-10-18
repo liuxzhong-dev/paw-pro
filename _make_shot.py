@@ -97,10 +97,13 @@ BOOTSTRAP = {
         "trigger": {},
     },
     "trigger": {},
-    # v39 自定义背景：默认=暮光紫（#bgLayer 关闭）。
-    # MKSHOT_BG=<图片路径> 时回读该图转 dataURL 塞进 bootstrap.bg，
-    # 截图即「用户换了自定义背景」的效果。
-    "bg": {"type": "default", "file": "", "url": ""},
+    # v40 背景三态：默认 builtin 暮光；MKSHOT_BG=<图片路径> 时回读该图转
+    # dataURL 塞进 bootstrap.bg（自定义背景效果）；MKSHOT_BGID=paper/ink
+    # 时截内置背景（白底/黑底）。
+    "bg": {"type": "builtin", "id": "twilight", "file": "", "url": ""},
+    # v40 外观：玻璃透明度 + 按钮样式（默认=v38 原质感 / 宝石）
+    "glass": {"panel": 1.0, "slot": 1.0},
+    "btnstyle": "gem",
 }
 
 def _mk_bg_custom():
@@ -123,6 +126,40 @@ def _mk_bg_custom():
 BG_CUSTOM = _mk_bg_custom()
 if BG_CUSTOM:
     BOOTSTRAP["bg"] = BG_CUSTOM
+else:
+    # MKSHOT_BGID=paper / ink：截内置背景（与后端 _BUILTIN_BG_IDS 对齐）
+    import os as _os2
+    _bgid = _os2.environ.get("MKSHOT_BGID", "")
+    if _bgid in ("twilight", "paper", "ink"):
+        BOOTSTRAP["bg"] = {"type": "builtin", "id": _bgid,
+                           "file": "", "url": ""}
+
+def _mk_crop_url():
+    """MKSHOT_CROP 环境变量：图片路径 → dataURL（裁剪对话框演示用）。"""
+    import base64
+    p = os.environ.get("MKSHOT_CROP", "")
+    if not p or not os.path.isfile(p):
+        return ""
+    with open(p, "rb") as f:
+        blob = f.read()
+    mime = "image/png"
+    if p.lower().endswith((".jpg", ".jpeg")):
+        mime = "image/jpeg"
+    elif p.lower().endswith(".webp"):
+        mime = "image/webp"
+    return "data:%s;base64,%s" % (mime, base64.b64encode(blob).decode("ascii"))
+# MKSHOT_GLASS="70,60" / MKSHOT_BTN=glass：截透明度/按钮样式变体
+import os as _os3
+_glass_env = _os3.environ.get("MKSHOT_GLASS", "")
+if _glass_env:
+    try:
+        _p, _s = [float(x) for x in _glass_env.split(",", 1)]
+        BOOTSTRAP["glass"] = {"panel": _p / 100, "slot": _s / 100}
+    except Exception:
+        pass
+_btn_env = _os3.environ.get("MKSHOT_BTN", "")
+if _btn_env in ("gem", "glass", "ghost", "pill"):
+    BOOTSTRAP["btnstyle"] = _btn_env
 
 # 两段式「已就绪」态：参数装好了、等触发键，两边都没在运行
 STATUS = {
@@ -185,7 +222,18 @@ RAW_DIAG = {
 }
 
 MOCK = """
+<style>
+/* 截图环境冻结动效：Edge 无头 + --virtual-time-budget 下 transition 可能停在
+   中间帧（实测 v40 浅色主题：输入框从暗槽过渡到白槽，被截成半透明灰，
+   误判成「主题没生效」）。截图是静态产物，冻结反而更接近稳定态。 */
+*,*::before,*::after{transition-duration:0s!important;
+  animation-duration:0s!important;animation-delay:0s!important}
+</style>
 <script>
+// MKSHOT_CROP：裁剪对话框演示钩子。把指定图片读成 dataURL 挂到
+// window.__MKSHOT_CROP，配合 MKSHOT_JS='cropOpen(window.__MKSHOT_CROP)'
+// 截「裁剪进行中」的界面（空串时 cropOpen 拿到空 URL 会走 onerror）。
+window.__MKSHOT_CROP = %(crop_url)s;
 window.pywebview = {api: {
   bootstrap:        async () => (%(bootstrap)s),
   status:           async () => (%(status)s),
@@ -201,11 +249,15 @@ window.pywebview = {api: {
   title_resize:     async () => ({ok:true}),
   toggle_pause:     async () => ({ok:true, paused:false}),
   save_settings:    async () => ({ok:true}),
-  // v39 自定义背景：mock 两条（截图环境没有 pywebview 真桥）。
-  // bootstrap.bg 已带默认暮光；这里让「选图/恢复」也能在
-  // MKSHOT_SELFTEST 里跑通不报错。
+  // v40 外观：mock 三条（截图环境没有 pywebview 真桥）。
+  // set_background / save_appearance 让「选背景卡/调滑块/换按钮样式」
+  // 在 MKSHOT_SELFTEST 里跑通不报错；reset 回 builtin 暮光。
+  set_background:  async (bg) => ({ok:true, bg: bg || {type:"builtin", id:"twilight", file:"", url:""}}),
+  save_appearance: async (d) => ({ok:true,
+      glass: d && d.glass ? d.glass : {panel:1, slot:1},
+      btnstyle: (d && d.btnstyle) || "gem"}),
   save_background:  async () => ({ok:true, bg:%(bg_custom)s}),
-  reset_background: async () => ({ok:true, bg:{type:"default", file:"", url:""}}),
+  reset_background: async () => ({ok:true, bg:{type:"builtin", id:"twilight", file:"", url:""}}),
   list_profiles:    async () => ({ok:true, profiles:["农场方案","副本速刷"]}),
   relaunch_as_admin:async () => ({ok:false, msg:"截图环境不触发提权"}),
   // 宏录制区（v27）：mock 里也要给全套方法。
@@ -438,6 +490,8 @@ MOCK = MOCK % {
     "bootstrap": json.dumps(BOOTSTRAP, ensure_ascii=False),
     "bg_custom": json.dumps(BG_CUSTOM or {"type": "custom", "file": "", "url": ""},
                             ensure_ascii=False),
+    # MKSHOT_CROP：图片路径 → dataURL（裁剪对话框演示）
+    "crop_url": json.dumps(_mk_crop_url(), ensure_ascii=False),
     "status": json.dumps(STATUS, ensure_ascii=False),
     "hotkey_text": json.dumps(HOTKEY_TEXT, ensure_ascii=False),
     "button_hotkeys": json.dumps(BUTTON_HOTKEYS, ensure_ascii=False),

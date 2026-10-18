@@ -56,20 +56,27 @@ def run():
         "hide": True,
         "trigger": {"raw_id": "g2"},   # 设备相关，不应被导出
         "window": {"x": 1},            # 历史死键，不应被导出
+        # v40 外观：玻璃透明度 / 按钮样式跟着配置迁移（换机器不掉质感）
+        "glass": {"panel": 0.7, "slot": 0.6},
+        "btnstyle": "pill",
     }
     d = api._export_dict()
-    check("导出含 schema_version=1", d.get("schema_version") == 1)
+    check("导出含 schema_version=%d" % D._CONFIG_SCHEMA_VERSION,
+          d.get("schema_version") == D._CONFIG_SCHEMA_VERSION)
     check("导出带 mouse.cps", d.get("mouse", {}).get("cps") == "15")
     check("导出带 key.keys", d.get("key", {}).get("keys") == "w")
     check("导出带 hide", d.get("hide") is True)
     check("导出不含 trigger（设备相关不迁移）", "trigger" not in d)
     check("导出不含 window（历史死键）", "window" not in d)
+    check("导出带 glass", d.get("glass") == {"panel": 0.7, "slot": 0.6}, d.get("glass"))
+    check("导出带 btnstyle", d.get("btnstyle") == "pill", d.get("btnstyle"))
 
     r = api.export_config()
     check("export_config ok", r["ok"], r.get("msg"))
     try:
         parsed = json.loads(r["text"])
-        check("export_config 文本可解析且版本对", parsed.get("schema_version") == 1)
+        check("export_config 文本可解析且版本对",
+              parsed.get("schema_version") == D._CONFIG_SCHEMA_VERSION)
     except Exception as e:
         check("export_config 文本可解析", False, str(e))
 
@@ -83,6 +90,12 @@ def run():
     check("导入后 mouse.cps 更新", api._settings["mouse"].get("cps") == "25")
     check("导入后 key.keys 更新", api._settings["key"].get("keys") == "e")
     check("导入后 hide 更新", api._settings.get("hide") is False)
+    # v1 老配置文件（没有 glass/btnstyle）必须照样能导入，且不动现有外观
+    check("v1 老配置导入后 glass 保持不变",
+          api._settings.get("glass") == {"panel": 0.7, "slot": 0.6},
+          api._settings.get("glass"))
+    check("v1 老配置导入后 btnstyle 保持不变",
+          api._settings.get("btnstyle") == "pill", api._settings.get("btnstyle"))
     check("导入后生成备份文件",
           os.path.isfile(os.path.join(_TMP, "ui_settings.json.bak")))
     check("导入后 last_mouse 同步", api.last_mouse.get("cps") == "25")
