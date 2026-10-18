@@ -29,8 +29,9 @@
       --grid:rgba(139,92,246,.055);
       --glow:rgba(139,92,246,.55);
       --glow-soft:rgba(139,92,246,.18);
-      /* ---- 形状：科技风靠切角而不是圆角 ---- */
-      --chamfer:12px;
+      /* ---- 形状：v37 起液态玻璃统一圆角（旧「切角而非圆角」的
+         --chamfer token 随形状语言切换一并移除，toast 的 GDI 切角
+         保持不动——它是自绘提示条，改形状要重画四角像素断言）---- */
       /* ---- 玻璃宝石层（v36：glassmorphism 四层配方）----
          一层 = 背后可糊的内容（body::before 极光光斑，玻璃在纯色背景上不可见）
          二层 = 半透明紫味填充 + backdrop-filter blur+saturate
@@ -51,6 +52,25 @@
       --glass-shadow:0 18px 44px rgba(2,0,10,.55),0 0 30px rgba(139,92,246,.10);
       --gem-hi:rgba(255,255,255,.40);
       --gem-low:rgba(20,4,48,.55);
+      /* ---- 液态玻璃层（v37：Apple Liquid Glass 观感）----
+         与 v36 霜玻璃的差别：① 圆角取代切角（clip-path 会裁掉外阴影，
+         液态玻璃要的是「整块浮起」）② 受光棱从「一条顶线」升级为
+         四边 rim（顶强底弱左右更弱，specular edge 是单项价值最高的改动）
+         ③ 新增斜向 sheen 镜面层（::after，负 z-index 画在填充之上内容之下）
+         ④ hover 时高光跟随鼠标（--mx/--my 由 JS 写，见 script 尾部）。
+         【铁律不减】同屏玻璃面板 ≤6；卡片内部不叠 backdrop-filter；
+         不动画 blur 半径；reduced-transparency 双降级。 */
+      --radius-liquid:18px;
+      --radius-soft:10px;
+      --rim-hi:rgba(255,255,255,.42);
+      --rim-lo:rgba(255,255,255,.10);
+      --rim-side:rgba(255,255,255,.08);
+      --slot-top:rgba(0,0,0,.24);
+      --slot-bot:rgba(255,255,255,.05);
+      --slot-edge:rgba(255,255,255,.07);
+      --sheen:linear-gradient(122deg,rgba(255,255,255,.15) 0%,
+             rgba(255,255,255,.05) 26%,transparent 52%);
+      --mx:50%;--my:-20%;
       --t-fast:.18s;
       --ease:cubic-bezier(.4,0,.2,1);
     }
@@ -113,9 +133,8 @@
     ::-webkit-scrollbar-thumb{
       background:linear-gradient(180deg,var(--accent-deep),#2E0F5E);
       border:1px solid rgba(139,92,246,.35);
-      /* 切角而不是圆角，和面板保持同一套形状语言 */
-      clip-path:polygon(0 0,100% 0,100% calc(100% - 4px),
-                        calc(100% - 4px) 100%,0 100%);
+      /* 小圆角和面板保持同一套形状语言（v37 起液态玻璃统一圆角） */
+      border-radius:4px;
       min-height:38px;
     }
     ::-webkit-scrollbar-thumb:hover{
@@ -214,13 +233,14 @@
       margin:14px 0 4px;
     }
     .trig-cell{
-      border:1px solid rgba(139,92,246,.18);
+      border:1px solid var(--slot-edge);
       border-left:2px solid var(--accent);
-      background:linear-gradient(180deg,rgba(139,92,246,.09),rgba(14,7,28,.46));
+      /* 内嵌玻璃槽：与面板的「凸起受光」相反——上暗下亮（凹槽收光少），
+         圆角取代切角，让整块面板读起来是一整块玻璃，而不是贴满小卡片 */
+      background:linear-gradient(180deg,rgba(0,0,0,.20),rgba(255,255,255,.03));
       padding:11px 14px;
-      clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),
-                        calc(100% - 7px) 100%,0 100%);
-      box-shadow:inset 0 1px 0 rgba(240,232,255,.08);
+      border-radius:var(--radius-soft);
+      box-shadow:inset 0 1px 0 var(--slot-top),inset 0 -1px 0 var(--slot-bot);
     }
     .trig-cell .tc-title{
       font-size:10px;letter-spacing:.18em;text-transform:uppercase;
@@ -292,8 +312,10 @@
        不再让用户面对几百条原始事件。 */
     .macro .mc-steps{
       margin-top:8px;max-height:190px;overflow:auto;
-      border:1px solid var(--line);background:rgba(255,255,255,.02);
+      border:1px solid var(--slot-edge);background:rgba(0,0,0,.16);
       font-family:"JetBrains Mono",Consolas,monospace;font-size:11.5px;
+      border-radius:var(--radius-soft);
+      box-shadow:inset 0 1px 0 var(--slot-top);
     }
     .macro .mc-steps::-webkit-scrollbar{width:8px}
     .macro .mc-steps::-webkit-scrollbar-thumb{background:rgba(139,92,246,.35)}
@@ -353,8 +375,7 @@
       background:rgba(139,92,246,.12);
       border:1px solid rgba(139,92,246,.45);
       padding:4px 8px 4px 10px;
-      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
-                        calc(100% - 5px) 100%,0 100%,0 5px);
+      border-radius:6px;
     }
     .capchip .x{
       cursor:pointer;color:var(--tx-dim);font-weight:400;
@@ -366,8 +387,7 @@
       font-size:11.5px;color:var(--accent-mint);
       border:1px dashed rgba(62,240,196,.5);
       padding:4px 11px;
-      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
-                        calc(100% - 5px) 100%,0 100%,0 5px);
+      border-radius:6px;
       animation:pulse 1.1s var(--ease) infinite;
     }
 
@@ -451,7 +471,7 @@
          靠**相邻边距折叠**维持在 11~16px；一旦变 flex，折叠失效，
          间距会变成 11+16=27px 这类叠加值，而且三栏元素组合不同、
          各自膨胀量还不一样 —— 越改越乱。等高就够整齐了。 */
-      .wrap{max-width:1840px;display:grid;gap:14px;
+      .wrap{max-width:1840px;display:grid;gap:18px;
             grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.08fr)}
       .wrap>.hero{grid-column:1/-1;grid-row:1}
       /* 【v31 新元素必须显式排位】流程条是 .wrap 的直接子元素，若不给
@@ -507,48 +527,63 @@
       .wrap>.macro .macro-grid{grid-template-columns:1fr}
     }
 
-    /* ---------- 面板通用（v36 玻璃宝石配方）----------
-       四层里这里占三层：半透明紫味填充 + backdrop-filter（背后极光被糊住）
-       + 1px 边缘 + inset 顶部高光/底部暗边（玻璃的棱）+ 多层外阴影（悬浮）。
-       clip-path 切角保留（与 toast 同构形状语言，且 verify_toast_style 断言它）。
-       注意 inset 高光会被切角裁掉两角——这是刻意的，切角语言优先。 */
+    /* ---------- 面板通用（v37 液态玻璃）----------
+       v36 的霜玻璃配方保留（半透明紫味填充 + 背后极光被糊住 + 多层外阴影），
+       升级三点：① clip-path 切角改 18px 大圆角——切角会把外阴影一起裁掉，
+       液态玻璃要「整块浮起」；② 受光棱从一条顶线升级为四边 rim：
+       顶 1.5px 亮棱 + 底反弹光 + 左右弱棱 + 内侧漫射 + 根部压深；
+       ③ ::after 斜向 sheen 镜面层（z-index:-1 画在填充之上、内容之下，
+       靠 stacking context 规则，不动子元素层级）。
+       hover 高光：::before 的 radial 位置由 --mx/--my 驱动，默认在面板外
+       （--my:-20%），鼠标进入后由 JS 实时写入坐标，高光跟着指针走。 */
     .panel{
-      position:relative;
+      position:relative;isolation:isolate;
       background:linear-gradient(160deg, var(--glass-fill) 0%,
                  var(--glass-fill-mid) 46%, var(--glass-fill-low) 100%);
       -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));
       backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-sat));
       border:1px solid var(--glass-edge);
-      clip-path:polygon(var(--chamfer) 0,100% 0,
-                        100% calc(100% - var(--chamfer)),
-                        calc(100% - var(--chamfer)) 100%,0 100%,0 var(--chamfer));
+      border-radius:var(--radius-liquid);
       box-shadow:var(--glass-shadow),
-                 inset 0 1px 0 var(--glass-hi),
-                 inset 0 -1px 0 rgba(0,0,0,.34),
-                 inset 0 0 34px rgba(139,92,246,.05);
+                 inset 0 1.5px 0 var(--rim-hi),
+                 inset 0 -1px 0 var(--rim-lo),
+                 inset 1px 0 0 var(--rim-side),
+                 inset -1px 0 0 var(--rim-side),
+                 inset 0 22px 34px -22px rgba(255,255,255,.07),
+                 inset 0 -26px 30px -26px rgba(0,0,0,.34);
       padding:16px 24px;
     }
-    /* 顶部全息高光描边：玻璃受光面，比原来更亮一档 */
+    /* 顶部受光线 + hover 跟随高光（radial 位置由 --mx/--my 决定） */
     .panel::before{
-      content:"";position:absolute;left:var(--chamfer);right:0;top:0;height:1px;
-      background:linear-gradient(90deg,transparent,var(--glass-edge-lit) 30%,
-                                 var(--glass-edge-lit) 70%,transparent);
+      content:"";position:absolute;left:var(--radius-liquid);right:var(--radius-liquid);
+      top:0;height:1px;pointer-events:none;
+      background:
+        radial-gradient(260px 90px at var(--mx) var(--my),
+          rgba(255,255,255,.16),transparent 70%),
+        linear-gradient(90deg,transparent,var(--glass-edge-lit) 30%,
+                       var(--glass-edge-lit) 70%,transparent);
+    }
+    /* 斜向镜面反光：液态玻璃的「亮面」，常显但极淡 */
+    .panel::after{
+      content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+      border-radius:inherit;background:var(--sheen);
     }
     /* 玻璃降级：不支持 backdrop-filter 的引擎（老 WebView2 / 软件渲染），
        把填充提成接近实色，保证可读性——玻璃是装饰，内容永远优先。 */
     @supports not (backdrop-filter:blur(2px)){
       .panel{background:linear-gradient(160deg, rgba(139,92,246,.16) 0%,
                     #150C2A 46%, #1B1036 100%)}
-      .panel::before{display:none}
+      .panel::after{display:none}
     }
-    /* ---------- 四角 HUD 角标 ---------- */
+    /* ---------- 四角 HUD 角标 ----------
+       圆角面板上角标必须内缩，否则会戳到圆角外面去 */
     .hud{position:relative}
-    .hud i{position:absolute;width:14px;height:14px;
-           border:1px solid var(--accent);opacity:.9;pointer-events:none}
-    .hud i:nth-child(1){left:-1px;top:-1px;border-right:0;border-bottom:0}
-    .hud i:nth-child(2){right:-1px;top:-1px;border-left:0;border-bottom:0}
-    .hud i:nth-child(3){left:-1px;bottom:-1px;border-right:0;border-top:0}
-    .hud i:nth-child(4){right:-1px;bottom:-1px;border-left:0;border-top:0}
+    .hud i{position:absolute;width:10px;height:10px;
+           border:1px solid var(--accent);opacity:.5;pointer-events:none}
+    .hud i:nth-child(1){left:7px;top:7px;border-right:0;border-bottom:0}
+    .hud i:nth-child(2){right:7px;top:7px;border-left:0;border-bottom:0}
+    .hud i:nth-child(3){left:7px;bottom:7px;border-right:0;border-top:0}
+    .hud i:nth-child(4){right:7px;bottom:7px;border-left:0;border-top:0}
 
 /* ---------- Hero ---------- */
   .hero{padding:18px 26px 16px}
@@ -574,10 +609,9 @@
     letter-spacing:.14em;text-transform:uppercase;
     color:var(--accent-mint);
     border:1px solid rgba(62,240,196,.38);
-    background:rgba(62,240,196,.11);
-    box-shadow:inset 0 1px 0 rgba(190,255,240,.14);
-    clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),
-                      calc(100% - 4px) 100%,0 100%,0 4px);
+    background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(62,240,196,.06));
+    box-shadow:inset 0 1px 0 var(--slot-top),inset 0 -1px 0 rgba(190,255,240,.10);
+    border-radius:999px;
   }
   .tag::before{
     content:"";width:5px;height:5px;border-radius:50%;
@@ -596,11 +630,10 @@
     height:34px;padding:0 15px;
     display:inline-flex;align-items:center;justify-content:center;
     font:600 11px/1 "Inter","Microsoft YaHei",inherit;letter-spacing:.12em;
-    color:var(--tx-mid);background:rgba(255,255,255,.06);
-    border:1px solid rgba(139,92,246,.16);
-    box-shadow:inset 0 1px 0 rgba(240,232,255,.10);
-    clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
-                      calc(100% - 8px) 100%,0 100%,0 8px);
+    color:var(--tx-mid);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.14));
+    border:1px solid var(--slot-edge);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08);
+    border-radius:var(--radius-soft);
     cursor:pointer;transition:color .15s var(--ease),border-color .15s var(--ease);
   }
   .ghostbtn:hover{color:var(--accent);border-color:rgba(139,92,246,.45)}
@@ -610,8 +643,10 @@
   /* 全局消息行：单独一行，和各区分区状态分开 */
   .gmsg{
     margin-top:10px;padding:7px 12px;font-size:12px;color:var(--tx-mid);
-    background:rgba(14,7,28,.46);border-left:2px solid var(--accent-deep);
-    box-shadow:inset 0 1px 0 rgba(240,232,255,.06);
+    background:linear-gradient(90deg,rgba(0,0,0,.20),rgba(255,255,255,.03));
+    border:1px solid var(--slot-edge);border-left:2px solid var(--accent-deep);
+    box-shadow:inset 0 1px 0 var(--slot-top);
+    border-radius:var(--radius-soft);
   }
 
   .hero .tagline{margin-top:11px;color:var(--tx-mid);font-size:12.5px;line-height:1.7}
@@ -623,13 +658,12 @@
   .kpi{
     position:relative;
     /* 卡片内的小宝石：半透明 + 顶部受光 + 底部压暗（不叠 blur，见铁律） */
-    background:linear-gradient(180deg,rgba(139,92,246,.10),rgba(14,7,28,.50));
-    border:1px solid rgba(139,92,246,.16);
+    background:linear-gradient(180deg,rgba(0,0,0,.20),rgba(255,255,255,.03));
+    border:1px solid var(--slot-edge);
     border-left:2px solid var(--accent-deep);
     padding:10px 13px;
-    clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),
-                      calc(100% - 8px) 100%,0 100%);
-    box-shadow:inset 0 1px 0 rgba(240,232,255,.10), inset 0 -1px 0 rgba(0,0,0,.26);
+    border-radius:var(--radius-soft);
+    box-shadow:inset 0 1px 0 var(--slot-top),inset 0 -1px 0 var(--slot-bot);
   }
   /* 辉光用 ::after 画在文字下层，而不是给文字加 text-shadow。
      【踩过的坑】text-shadow + overflow:hidden + text-overflow:ellipsis
@@ -685,11 +719,12 @@
   .flow{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     margin-top:14px;padding:9px 16px;
-    border:1px solid rgba(139,92,246,.18);
+    border:1px solid var(--slot-edge);
     border-left:2px solid var(--accent-deep);
-    background:linear-gradient(90deg,rgba(139,92,246,.10),rgba(14,7,28,.44));
-    box-shadow:inset 0 1px 0 rgba(240,232,255,.08);
+    background:linear-gradient(90deg,rgba(0,0,0,.20),rgba(255,255,255,.03));
+    box-shadow:inset 0 1px 0 var(--slot-top),inset 0 -1px 0 var(--slot-bot);
     font-size:12px;color:var(--tx-mid);
+    border-radius:var(--radius-soft);
   }
   .flow .fs b{color:var(--accent);margin-right:5px;font-weight:700}
   .flow .fa{color:var(--accent-deep)}
@@ -744,8 +779,7 @@
       font-size:11px;font-weight:700;letter-spacing:.1em;
       padding:3px 10px;color:var(--accent);
       border:1px solid rgba(139,92,246,.5);background:rgba(139,92,246,.12);
-      clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),
-                        calc(100% - 5px) 100%,0 100%,0 5px);
+      border-radius:6px;
       box-shadow:0 0 14px rgba(139,92,246,.28), inset 0 1px 0 rgba(240,232,255,.18);
     }
     .keycap.amber{
@@ -766,11 +800,10 @@
        与面板的「凸起 + 顶部受光」正好相反，层次一眼可读。
        注意：控件在卡片内部，**不加 backdrop-filter**（嵌套模糊是平方开销）。 */
     input,select{
-      background:rgba(10,5,22,.52);border:1px solid rgba(139,92,246,.18);
+      background:rgba(10,5,22,.52);border:1px solid var(--slot-edge);
       color:var(--tx-hi);padding:8px 11px;font-size:13px;outline:none;width:100%;
       font-family:inherit;
-      clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),
-                        calc(100% - 6px) 100%,0 100%,0 6px);
+      border-radius:var(--radius-soft);
       box-shadow:inset 0 2px 6px rgba(0,0,0,.34), inset 0 -1px 0 rgba(240,232,255,.05);
       transition:all var(--t-fast) var(--ease);
     }
@@ -820,9 +853,8 @@
       /* 半透明填充：按钮背后也有极光，透出来才和玻璃面板是一家人 */
       background:linear-gradient(180deg,rgba(139,92,246,.20),rgba(139,92,246,.07));
       border:1px solid rgba(139,92,246,.42);
-      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
-                        calc(100% - 8px) 100%,0 100%,0 8px);
-      box-shadow:inset 0 1px 0 rgba(240,232,255,.16), inset 0 -1px 0 rgba(0,0,0,.28);
+      border-radius:var(--radius-soft);
+      box-shadow:inset 0 1.5px 0 rgba(240,232,255,.20), inset 0 -1px 0 rgba(0,0,0,.28);
       transition:all var(--t-fast) var(--ease);
     }
     /* hover 只加深填充 + 加辉光 + 提亮顶部高光，不动 blur（性能铁律） */
@@ -889,8 +921,7 @@
       display:none;margin-top:12px;
       border:1px solid rgba(255,154,60,.5);background:rgba(255,154,60,.12);
       color:var(--spark);padding:10px 14px;font-size:12px;line-height:1.7;
-      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
-                        calc(100% - 8px) 100%,0 100%,0 8px);
+      border-radius:var(--radius-soft);
       box-shadow:inset 0 1px 0 rgba(255,210,150,.14);
     }
     .elevban.show{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -905,8 +936,7 @@
       margin-top:14px;border:1px solid rgba(255,154,60,.38);
       background:rgba(255,154,60,.10);color:var(--spark);
       padding:10px 13px;font-size:12px;
-      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),
-                        calc(100% - 8px) 100%,0 100%,0 8px);
+      border-radius:var(--radius-soft);
       box-shadow:inset 0 1px 0 rgba(255,210,150,.14);
     }
     @media (prefers-reduced-motion:reduce){ *{animation:none!important} }
@@ -915,6 +945,7 @@
       body::before,body::after{display:none}
       .panel,.cfg-panel{background:linear-gradient(160deg,#180E30 0%,#120A24 100%)}
       .panel,.cfg-panel,.titlebar{-webkit-backdrop-filter:none;backdrop-filter:none}
+      .panel::after{display:none}
     }
   /* ---------- 配置面板（导入/导出/方案） ---------- */
   /* 【默认必须隐藏】这个面板只在点齿轮按钮时出现。之前漏写 display:none，
@@ -927,8 +958,9 @@
     background:linear-gradient(170deg, rgba(48,28,88,.58) 0%, rgba(16,8,32,.62) 100%);
     -webkit-backdrop-filter:blur(26px) saturate(var(--glass-sat));
     backdrop-filter:blur(26px) saturate(var(--glass-sat));
-    border:1px solid var(--glass-edge); border-radius:var(--chamfer); padding:12px;
-    box-shadow:0 18px 50px rgba(2,0,10,.6), inset 0 1px 0 rgba(240,232,255,.13);
+    border:1px solid var(--glass-edge); border-radius:var(--radius-liquid); padding:12px;
+    box-shadow:0 18px 50px rgba(2,0,10,.6), inset 0 1.5px 0 var(--rim-hi),
+               inset 0 -1px 0 var(--rim-lo);
     display:none; }
   .cfg-panel.open{ display:block; }
   .cfg-sec{ margin-bottom:12px; }
@@ -2848,6 +2880,32 @@
       else{ cfgMsg((r && r.msg) || "删除失败", true); }
     }catch(e){ cfgMsg("删除出错：" + e, true); }
   }
+
+  /* ---------- 液态玻璃：高光跟随指针（v37）----------
+     Apple Liquid Glass 的标志性交互：受光高光跟着鼠标走。
+     只写 CSS 自定义属性 --mx/--my（即 .panel::before 里 radial 的位置），
+     不触发重排；rect 在 pointerenter 时缓存一次，不每帧量。
+     指针离开时把高光移回面板外（--my:-20%，天然不可见）。 */
+  function liquidGlassBind(){
+    var list = document.querySelectorAll(".panel,.cfg-panel");
+    for(var i=0;i<list.length;i++){
+      (function(p){
+        var r = null;
+        p.addEventListener("pointerenter",function(){ r = p.getBoundingClientRect(); });
+        p.addEventListener("pointermove",function(e){
+          if(!r) return;
+          p.style.setProperty("--mx",
+            ((e.clientX-r.left)/r.width*100).toFixed(1)+"%");
+          p.style.setProperty("--my",
+            ((e.clientY-r.top)/r.height*100).toFixed(1)+"%");
+        });
+        p.addEventListener("pointerleave",function(){
+          r = null; p.style.setProperty("--my","-20%");
+        });
+      })(list[i]);
+    }
+  }
+  liquidGlassBind();
 </script>
 </body>
 </html>

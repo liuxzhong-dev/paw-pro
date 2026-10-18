@@ -76,13 +76,13 @@ for var, const, label in (
           v is not None and v == const,
           "dashboard=%s toast=%s" % (v and hexof(v), hexof(const)))
 
-m = re.search(r"--chamfer:\s*(\d+)px", html)
-check("--chamfer 与 TOAST_CHAMFER 一致",
-      bool(m) and int(m.group(1)) == toast.TOAST_CHAMFER,
-      "dashboard=%s toast=%s" % (m and m.group(1), toast.TOAST_CHAMFER))
+m = re.search(r"--radius-liquid:\s*(\d+)px", html)
+check("主界面面板用液态圆角 --radius-liquid（v37 起形状语言与 GDI toast 解耦，颜色仍同源）",
+      bool(m) and int(m.group(1)) >= 14,
+      "dashboard=%s" % (m and m.group(1)))
 _flat = re.sub(r"\s+", "", html)
-check("主界面用 clip-path polygon 切角（同构形状语言）",
-      "clip-path:polygon(var(--chamfer)0," in _flat)
+check("面板 rim/sheen 液态两层齐备（四边受光棱 + 斜向镜面）",
+      "border-radius:var(--radius-liquid)" in _flat and "var(--sheen)" in _flat)
 
 # ----------------------------------------------------------------------
 print("\n[2] 离屏渲染像素断言（真实绘制代码的输出）")
