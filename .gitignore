@@ -14,6 +14,7 @@ _old/
 
 # 运行时用户数据
 **/ui_settings.json
+config.json
 profiles/
 macros/
 *.bak
@@ -26,6 +27,12 @@ _shots/
 *.tmp
 _reg_*.txt
 _reg_*out*.txt
+
+# 开发期诊断探针与历史构建脚本（本地保留，不入库）
+# 只排除一次性排障脚本；verify_*.py 是回归测试入口，必须保留
+diag_*.py
+_build_v*.sh
+_tray_debug*.py
 
 # 交付目录中的源码镜像；Git 只跟踪项目根的唯一源码
 交付/source/
